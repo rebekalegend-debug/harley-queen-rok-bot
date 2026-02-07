@@ -51,9 +51,10 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
     await channel.send({
       content:
-        `👋 Welcome ${member}!\n` +
-        `Click the button below to enter your **Rise of Kingdoms in-game name**.\n` +
-        `After you submit it, I’ll rename you and give you **3237 Member** access.`,
+`👋 Welcome ${member}!
+
+1️⃣ Upload a screenshot of your **Rise of Kingdoms profile**.  
+2️⃣ Click the button below to enter your **in-game name** and unlock the server.`,
       components: [row]
     });
   } catch (e) {
@@ -148,4 +149,5 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.login(TOKEN);
+
 
