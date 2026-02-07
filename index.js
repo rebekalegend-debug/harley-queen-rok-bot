@@ -132,9 +132,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
 
       return interaction.reply({
-        content: `✅ Done! Nickname set to **${name}** and role **3237 Member** added.`,
-        ephemeral: true
-      });
+  content: `🎉 All set, **${name}**! We know who you are now — your role is added. Enjoy the server!`,
+  ephemeral: true
+});
+
     }
   } catch (e) {
     console.error("Interaction error:", e);
@@ -147,3 +148,4 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.login(TOKEN);
+
