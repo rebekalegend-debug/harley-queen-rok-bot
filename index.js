@@ -90,13 +90,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.showModal(modal);
     }
 
-    // Modal submit -> rename + role
+    // Modal submit -> rename + role + remove/disable button
     if (interaction.isModalSubmit()) {
       const [key, userId] = interaction.customId.split(":");
       if (key !== "ingame_modal") return;
 
       if (interaction.user.id !== userId) {
         return interaction.reply({ content: "This form isn’t for you.", ephemeral: true });
+      }
+
+      const member = interaction.member; // GuildMember
+      if (!member) {
+        return interaction.reply({ content: "❌ Could not find your server member record.", ephemeral: true });
+      }
+
+      // Optional: block re-verification if they already have the role
+      if (member.roles.cache.has(MEMBER_ROLE_ID)) {
+        // Also remove the button if somehow they got here again
+        if (interaction.message) {
+          await interaction.message.edit({ components: [] }).catch(() => {});
+        }
+        return interaction.reply({ content: "✅ You are already verified.", ephemeral: true });
       }
 
       const raw = interaction.fields.getTextInputValue("ingame_name");
@@ -108,14 +122,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
       }
 
-      const member = interaction.member; // GuildMember
-      if (!member) {
-        return interaction.reply({ content: "❌ Could not find your server member record.", ephemeral: true });
-      }
-
       // Check permissions
       const me = await member.guild.members.fetchMe();
-      if (!me.permissions.has(PermissionFlagsBits.ManageNicknames) || !me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      if (
+        !me.permissions.has(PermissionFlagsBits.ManageNicknames) ||
+        !me.permissions.has(PermissionFlagsBits.ManageRoles)
+      ) {
         return interaction.reply({
           content: "❌ I’m missing permissions (Manage Nicknames / Manage Roles). Ask an admin to fix my permissions.",
           ephemeral: true
@@ -123,26 +135,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       // Rename
-      await member.setNickname(name).catch((err) => {
+      await member.setNickname(name).catch(() => {
         throw new Error("Failed to set nickname. Ensure my role is above the member and I have Manage Nicknames.");
       });
 
       // Add role
-      await member.roles.add(MEMBER_ROLE_ID).catch((err) => {
+      await member.roles.add(MEMBER_ROLE_ID).catch(() => {
         throw new Error("Failed to add role. Ensure my role is above '3237 Member' and I have Manage Roles.");
       });
 
-      return interaction.reply({
-  content: `🎉 All set, **${name}**! We know who you are now — your role is added. Enjoy the server!`,
-  ephemeral: true
-});
+      // ✅ REMOVE THE BUTTON AFTER SUCCESS (disappears completely)
+      // (If you prefer "disabled" instead of removed, tell me and I'll swap it.)
+      if (interaction.message) {
+        await interaction.message.edit({ components: [] }).catch(() => {});
+      }
 
+      return interaction.reply({
+        content: `🎉 All set, **${name}**! We know who you are now — your role is added. Enjoy the server!`,
+        ephemeral: true
+      });
     }
   } catch (e) {
     console.error("Interaction error:", e);
     if (interaction.isRepliable()) {
       try {
-        await interaction.reply({ content: "❌ Something went wrong. Ask an admin to check bot permissions/role order.", ephemeral: true });
+        await interaction.reply({
+          content: "❌ Something went wrong. Ask an admin to check bot permissions/role order.",
+          ephemeral: true
+        });
       } catch {}
     }
   }
