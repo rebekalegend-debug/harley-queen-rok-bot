@@ -18,6 +18,9 @@ const TOKEN = process.env.TOKEN;
 const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID; // e.g. "123..."
 const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;         // role id
 
+// The real person/admin to contact
+const HARLEY_QUINN_USER_ID = "297057337590546434";
+
 // Simple safety: in-game name length and allowed chars (adjust as you want)
 function sanitizeName(raw) {
   const name = raw.trim();
@@ -27,7 +30,7 @@ function sanitizeName(raw) {
   return name;
 }
 
-// Track who has already uploaded a screenshot (per runtime)
+// Track who has already uploaded a screenshot (runtime memory)
 const screenshotDone = new Map(); // userId -> true
 
 const client = new Client({
@@ -35,7 +38,8 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent // REQUIRED to read message attachments reliably in many setups
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages // to receive DMs
   ],
   partials: [Partials.Channel, Partials.Message]
 });
@@ -49,7 +53,6 @@ client.on(Events.GuildMemberAdd, async (member) => {
     const channel = await member.guild.channels.fetch(WELCOME_CHANNEL_ID).catch(() => null);
     if (!channel) return;
 
-    // reset state for safety
     screenshotDone.delete(member.id);
 
     await channel.send({
@@ -63,31 +66,62 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here. After you�
   }
 });
 
-// Detect screenshot upload (any image)
+// ✅ Auto-reply to DMs so people stop confusing you with a real person
 client.on(Events.MessageCreate, async (message) => {
   try {
+    // Ignore bot messages
     if (message.author.bot) return;
-    if (!message.guild) return;
+
+    // If it's a DM (no guild)
+    if (!message.guild) {
+      // Do not reply to the Harley Quinn user (optional safety)
+      if (message.author.id === HARLEY_QUINN_USER_ID) return;
+
+      await message.reply(
+        `Hi! I’m just a bot 🤖\n\n` +
+        `Please reach out to <@${HARLEY_QUINN_USER_ID}> for help.`
+      ).catch(() => {});
+      return;
+    }
+
+    // --- Below: your welcome-channel enforcement logic ---
+
     if (message.channel.id !== WELCOME_CHANNEL_ID) return;
 
-    // Must be an image attachment
+    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+    if (!member) {
+      await message.delete().catch(() => {});
+      return;
+    }
+
+    const isVerified = member.roles.cache.has(MEMBER_ROLE_ID);
+
     const hasImage = message.attachments.some((att) => {
-      // contentType can be null sometimes; also fallback to file extension
       if (att.contentType?.startsWith("image/")) return true;
       const name = (att.name || "").toLowerCase();
-      return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp") || name.endsWith(".gif");
+      return (
+        name.endsWith(".png") ||
+        name.endsWith(".jpg") ||
+        name.endsWith(".jpeg") ||
+        name.endsWith(".webp") ||
+        name.endsWith(".gif")
+      );
     });
 
-    if (!hasImage) return;
+    if (isVerified) {
+      await message.delete().catch(() => {});
+      return;
+    }
 
-    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-    if (!member) return;
+    if (!hasImage) {
+      await message.delete().catch(() => {});
+      return;
+    }
 
-    // If already verified, ignore
-    if (member.roles.cache.has(MEMBER_ROLE_ID)) return;
-
-    // Only do this once per user (per runtime)
-    if (screenshotDone.get(message.author.id)) return;
+    if (screenshotDone.get(message.author.id)) {
+      await message.delete().catch(() => {});
+      return;
+    }
 
     screenshotDone.set(message.author.id, true);
 
@@ -115,7 +149,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const [key, targetId] = interaction.customId.split(":");
       if (key !== "verify_ingame") return;
 
-      // Only the correct user can use their button
       if (interaction.user.id !== targetId) {
         return interaction.reply({ content: "This button isn’t for you.", ephemeral: true });
       }
@@ -135,7 +168,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.showModal(modal);
     }
 
-    // Modal submit -> rename + role + remove button
+    // Modal submit -> rename + role + edit the button message
     if (interaction.isModalSubmit()) {
       const [key, userId] = interaction.customId.split(":");
       if (key !== "ingame_modal") return;
@@ -144,16 +177,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.reply({ content: "This form isn’t for you.", ephemeral: true });
       }
 
-      const member = interaction.member; // GuildMember
+      const member = interaction.member;
       if (!member) {
         return interaction.reply({ content: "❌ Could not find your server member record.", ephemeral: true });
       }
 
-      // Stop if already verified
       if (member.roles.cache.has(MEMBER_ROLE_ID)) {
-        // Remove the button if present
         if (interaction.message) {
-          await interaction.message.edit({ components: [] }).catch(() => {});
+          await interaction.message.edit({
+            content: `✅ All set, ${interaction.user}! Your role is added. Enjoy the server!`,
+            components: []
+          }).catch(() => {});
         }
         return interaction.reply({ content: "✅ You are already verified.", ephemeral: true });
       }
@@ -167,7 +201,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
       }
 
-      // Check permissions
       const me = await member.guild.members.fetchMe();
       if (
         !me.permissions.has(PermissionFlagsBits.ManageNicknames) ||
@@ -179,19 +212,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
       }
 
-      // Rename
       await member.setNickname(name).catch(() => {
         throw new Error("Failed to set nickname. Ensure my role is above the member and I have Manage Nicknames.");
       });
 
-      // Add role
       await member.roles.add(MEMBER_ROLE_ID).catch(() => {
         throw new Error("Failed to add role. Ensure my role is above the target role and I have Manage Roles.");
       });
 
-      // ✅ Hide the button (remove components from the button message)
       if (interaction.message) {
-        await interaction.message.edit({ components: [] }).catch(() => {});
+        await interaction.message.edit({
+          content: `✅ All set, ${interaction.user}! Your role is added. Enjoy the server!`,
+          components: []
+        }).catch(() => {});
       }
 
       return interaction.reply({
