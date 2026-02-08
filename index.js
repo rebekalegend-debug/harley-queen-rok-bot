@@ -14,23 +14,30 @@ const {
 
 const TOKEN = process.env.TOKEN;
 
-// REQUIRED: set these in Railway Variables (or hardcode, but don't)
+// REQUIRED: set these in Railway Variables
 const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID; // e.g. "123..."
-const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;         // "3237 Member" role id
+const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;         // role id
 
 // Simple safety: in-game name length and allowed chars (adjust as you want)
 function sanitizeName(raw) {
   const name = raw.trim();
   if (name.length < 2 || name.length > 32) return null; // Discord nickname limit is 32
-  // allow letters, numbers, spaces and some symbols commonly used
   const ok = /^[\p{L}\p{N} ._\-'\[\]#]+$/u.test(name);
   if (!ok) return null;
   return name;
 }
 
+// Track who has already uploaded a screenshot (per runtime)
+const screenshotDone = new Map(); // userId -> true
+
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
-  partials: [Partials.Channel]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent // REQUIRED to read message attachments reliably in many setups
+  ],
+  partials: [Partials.Channel, Partials.Message]
 });
 
 client.once(Events.ClientReady, () => {
@@ -42,23 +49,62 @@ client.on(Events.GuildMemberAdd, async (member) => {
     const channel = await member.guild.channels.fetch(WELCOME_CHANNEL_ID).catch(() => null);
     if (!channel) return;
 
-    const button = new ButtonBuilder()
-      .setCustomId(`verify_ingame:${member.id}`)
-      .setLabel("Enter In-Game Name")
-      .setStyle(ButtonStyle.Primary);
-
-    const row = new ActionRowBuilder().addComponents(button);
+    // reset state for safety
+    screenshotDone.delete(member.id);
 
     await channel.send({
       content:
 `👋 Welcome ${member}!
 
-1️⃣ Upload a screenshot of your **Rise of Kingdoms profile**.  
-2️⃣ Click the button below to enter your **in-game name** and unlock the server.`,
-      components: [row]
+Please upload a screenshot of your **Rise of Kingdoms profile** here. After you’re done, the bot will detect it and let you continue to unlock the server.`
     });
   } catch (e) {
     console.error("GuildMemberAdd error:", e);
+  }
+});
+
+// Detect screenshot upload (any image)
+client.on(Events.MessageCreate, async (message) => {
+  try {
+    if (message.author.bot) return;
+    if (!message.guild) return;
+    if (message.channel.id !== WELCOME_CHANNEL_ID) return;
+
+    // Must be an image attachment
+    const hasImage = message.attachments.some((att) => {
+      // contentType can be null sometimes; also fallback to file extension
+      if (att.contentType?.startsWith("image/")) return true;
+      const name = (att.name || "").toLowerCase();
+      return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp") || name.endsWith(".gif");
+    });
+
+    if (!hasImage) return;
+
+    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+    if (!member) return;
+
+    // If already verified, ignore
+    if (member.roles.cache.has(MEMBER_ROLE_ID)) return;
+
+    // Only do this once per user (per runtime)
+    if (screenshotDone.get(message.author.id)) return;
+
+    screenshotDone.set(message.author.id, true);
+
+    const button = new ButtonBuilder()
+      .setCustomId(`verify_ingame:${message.author.id}`)
+      .setLabel("Enter In-Game Name")
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(button);
+
+    await message.reply({
+      content:
+`Great! Click the button below to enter your **exact in-game name** to get a role and unlock the server.`,
+      components: [row]
+    });
+  } catch (e) {
+    console.error("MessageCreate error:", e);
   }
 });
 
@@ -69,7 +115,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const [key, targetId] = interaction.customId.split(":");
       if (key !== "verify_ingame") return;
 
-      // Only the joining user can use their button
+      // Only the correct user can use their button
       if (interaction.user.id !== targetId) {
         return interaction.reply({ content: "This button isn’t for you.", ephemeral: true });
       }
@@ -86,11 +132,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setMaxLength(32);
 
       modal.addComponents(new ActionRowBuilder().addComponents(input));
-
       return interaction.showModal(modal);
     }
 
-    // Modal submit -> rename + role + remove/disable button
+    // Modal submit -> rename + role + remove button
     if (interaction.isModalSubmit()) {
       const [key, userId] = interaction.customId.split(":");
       if (key !== "ingame_modal") return;
@@ -104,9 +149,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.reply({ content: "❌ Could not find your server member record.", ephemeral: true });
       }
 
-      // Optional: block re-verification if they already have the role
+      // Stop if already verified
       if (member.roles.cache.has(MEMBER_ROLE_ID)) {
-        // Also remove the button if somehow they got here again
+        // Remove the button if present
         if (interaction.message) {
           await interaction.message.edit({ components: [] }).catch(() => {});
         }
@@ -141,17 +186,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Add role
       await member.roles.add(MEMBER_ROLE_ID).catch(() => {
-        throw new Error("Failed to add role. Ensure my role is above '3237 Member' and I have Manage Roles.");
+        throw new Error("Failed to add role. Ensure my role is above the target role and I have Manage Roles.");
       });
 
-      // ✅ REMOVE THE BUTTON AFTER SUCCESS (disappears completely)
-      // (If you prefer "disabled" instead of removed, tell me and I'll swap it.)
+      // ✅ Hide the button (remove components from the button message)
       if (interaction.message) {
         await interaction.message.edit({ components: [] }).catch(() => {});
       }
 
       return interaction.reply({
-        content: `🎉 All set, **${name}**! We know who you are now — your role is added. Enjoy the server!`,
+        content: `✅ All set, ${interaction.user}! Your role is added. Enjoy the server!`,
         ephemeral: true
       });
     }
@@ -169,5 +213,3 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.login(TOKEN);
-
-
