@@ -184,6 +184,77 @@ export function setupTemplePinger(client) {
 
     const args = msg.content.slice(PREFIX.length).trim().split(/\s+/);
     const cmd = (args.shift() ?? "").toLowerCase();
+    // =========================
+    // $temple ... (CONFIG COMMANDS)
+    // - set channel / set role: Admin-only (Manage Server)
+    // - access role: Server Owner only
+    // =========================
+    if (cmd === "temple") {
+      if (!msg.guild) return;
+
+      const sub = (args.shift() ?? "").toLowerCase();
+
+      // --- helper checks ---
+      const isAdmin = msg.member?.permissions?.has?.("ManageGuild");
+      const isOwner = msg.author.id === msg.guild.ownerId;
+
+      // $temple show
+      if (sub === "show" || sub === "status") {
+        return msg.reply({ content: statusText(), allowedMentions: { roles: [] } });
+      }
+
+      // $temple set channel #channel  (Admin)
+      if (sub === "set" && (args[0] ?? "").toLowerCase() === "channel") {
+        if (!isAdmin) return msg.reply("❌ You need **Manage Server** to set the temple channel.");
+        const ch = msg.mentions.channels.first();
+        if (!ch) return msg.reply("Usage: `$temple set channel #channel`");
+
+        cfg.targetChannelId = ch.id;
+        saveConfig(cfg);
+        return msg.reply(`✅ Temple channel set to ${ch}`);
+      }
+
+      // $temple set role @role (Admin)
+      if (sub === "set" && (args[0] ?? "").toLowerCase() === "role") {
+        if (!isAdmin) return msg.reply("❌ You need **Manage Server** to set the temple role.");
+        const role = msg.mentions.roles.first();
+        if (!role) return msg.reply("Usage: `$temple set role @role`");
+
+        cfg.pingRoleId = role.id;
+        saveConfig(cfg);
+        return msg.reply(`✅ Temple ping role set to **${role.name}**`);
+      }
+
+      // $temple access @Role (Owner)
+      if (sub === "access") {
+        if (!isOwner) return msg.reply("❌ Only the **Server Owner** can set Temple access role.");
+
+        // $temple access clear
+        if ((args[0] ?? "").toLowerCase() === "clear") {
+          cfg.allowedRoleId = null;
+          saveConfig(cfg);
+          return msg.reply("✅ Temple access role cleared.");
+        }
+
+        // $temple access @Role
+        const role = msg.mentions.roles.first();
+        if (!role) return msg.reply("Usage: `$temple access @Role` OR `$temple access clear`");
+
+        cfg.allowedRoleId = role.id;
+        saveConfig(cfg);
+        return msg.reply(`✅ Temple access role set to **${role.name}**`);
+      }
+
+      return msg.reply(
+        "**Temple Setup Commands**\n" +
+        "`$temple set channel #channel` *(Admin: Manage Server)*\n" +
+        "`$temple set role @role` *(Admin: Manage Server)*\n" +
+        "`$temple show` *(shows status)*\n\n" +
+        "**Temple Permission Commands**\n" +
+        "`$temple access @Role` *(Owner only)*\n" +
+        "`$temple access clear` *(Owner only)*"
+      );
+    }
 
     // =========================
     // OWNER-ONLY: set/remove allowed role
