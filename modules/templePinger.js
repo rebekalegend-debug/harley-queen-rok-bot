@@ -109,11 +109,15 @@ async function tickScheduler(client) {
 function statusText() {
   if (!cfg?.targetChannelId || !cfg?.pingRoleId) {
     return (
-      `Temple pinger not configured.\n` +
-      `Set env vars: TEMPLE_CHANNEL_ID and TEMPLE_PING_ROLE_ID\n` +
-      `Then restart bot.`
+      `Temple pinger not configured yet.\n` +
+      `Owner/Admin must run:\n` +
+      `• \`${PREFIX}temple set channel #channel\`\n` +
+      `• \`${PREFIX}temple set role @role\`\n` +
+      `Then set the next drop with:\n` +
+      `• \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\``
     );
   }
+
 
   if (!cfg?.nextShieldDropISO) {
     return (
