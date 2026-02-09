@@ -41,7 +41,7 @@ function ensureFutureDrop() {
   let d = new Date(cfg.nextShieldDropISO);
   if (Number.isNaN(d.getTime())) {
     cfg.nextShieldDropISO = null;
-    saveConfig(cfg);
+    saveConfig(msg.guild.id, cfg);
     return;
   }
 
@@ -50,7 +50,7 @@ function ensureFutureDrop() {
   }
 
   cfg.nextShieldDropISO = d.toISOString();
-  saveConfig(cfg);
+  saveConfig(msg.guild.id, cfg);
 }
 
 function computeTimes() {
@@ -81,7 +81,7 @@ function advanceOneCycle() {
   const d = new Date(cfg.nextShieldDropISO);
   const next = new Date(d.getTime() + cfg.cycleDays * 24 * 60 * 60 * 1000);
   cfg.nextShieldDropISO = next.toISOString();
-  saveConfig(cfg);
+  saveConfig(msg.guild.id, cfg);
 }
 
 async function tickScheduler(client) {
@@ -176,7 +176,7 @@ async function canUseTemple(msg) {
 }
 
 export function setupTemplePinger(client) {
-  cfg = loadConfig();
+  cfg = loadConfig(msg.guild.id);
   ensureFutureDrop();
 
   console.log("[TEMPLE] module registered");
@@ -214,7 +214,7 @@ export function setupTemplePinger(client) {
         if (!ch) return msg.reply("Usage: `$temple set channel #channel`");
 
         cfg.targetChannelId = ch.id;
-        saveConfig(cfg);
+        saveConfig(msg.guild.id, cfg);
         return msg.reply(`✅ Temple channel set to ${ch}`);
       }
 
@@ -225,7 +225,7 @@ export function setupTemplePinger(client) {
         if (!role) return msg.reply("Usage: `$temple set role @role`");
 
         cfg.pingRoleId = role.id;
-        saveConfig(cfg);
+        saveConfig(msg.guild.id, cfg);
         return msg.reply(`✅ Temple ping role set to **${role.name}**`);
       }
 
@@ -236,7 +236,7 @@ export function setupTemplePinger(client) {
         // $temple access clear
         if ((args[0] ?? "").toLowerCase() === "clear") {
           cfg.allowedRoleId = null;
-          saveConfig(cfg);
+          saveConfig(msg.guild.id, cfg);
           return msg.reply("✅ Temple access role cleared.");
         }
 
@@ -245,7 +245,7 @@ export function setupTemplePinger(client) {
         if (!role) return msg.reply("Usage: `$temple access @Role` OR `$temple access clear`");
 
         cfg.allowedRoleId = role.id;
-        saveConfig(cfg);
+        saveConfig(msg.guild.id, cfg);
         return msg.reply(`✅ Temple access role set to **${role.name}**`);
       }
 
@@ -276,14 +276,14 @@ export function setupTemplePinger(client) {
         if (!role) return msg.reply("Usage: `$temple access @Role` or `$temple access clear`");
 
         cfg.allowedRoleId = role.id;
-        saveConfig(cfg);
+        saveConfig(msg.guild.id, cfg);
         return msg.reply(`✅ Temple access role set to **${role.name}**`);
       }
 
       // $temple access clear
       if (sub === "access" && (args[0] ?? "").toLowerCase() === "clear") {
         cfg.allowedRoleId = null;
-        saveConfig(cfg);
+        saveConfig(msg.guild.id, cfg);
         return msg.reply("✅ Temple access role cleared. Only Server Owner can use Temple commands now.");
       }
 
@@ -344,7 +344,7 @@ export function setupTemplePinger(client) {
       if (!d) return msg.reply("Invalid format. Example: `$setdrop 2026-02-13 18:31 +02:00`");
 
       cfg.nextShieldDropISO = d.toISOString();
-      saveConfig(cfg);
+      saveConfig(msg.guild.id, cfg);
       lastPingedForDropISO = null;
 
       return msg.reply(
@@ -359,7 +359,7 @@ export function setupTemplePinger(client) {
         return msg.reply(`Usage: \`${PREFIX}cycle 6\` or \`${PREFIX}cycle 7\``);
       }
       cfg.cycleDays = days;
-      saveConfig(cfg);
+      saveConfig(msg.guild.id, cfg);
       lastPingedForDropISO = null;
       return msg.reply(`✅ Cycle updated: **${cfg.cycleDays} days**`);
     }
@@ -370,7 +370,7 @@ export function setupTemplePinger(client) {
         return msg.reply(`Usage: \`${PREFIX}pinghours 24\` (1–168)`);
       }
       cfg.pingHoursBefore = hours;
-      saveConfig(cfg);
+      saveConfig(msg.guild.id, cfg);
       lastPingedForDropISO = null;
       return msg.reply(`✅ Ping offset updated: **${cfg.pingHoursBefore} hours before drop**`);
     }
@@ -403,7 +403,7 @@ export function setupTemplePinger(client) {
     if (schedulerStarted) return;
     schedulerStarted = true;
 
-    cfg = loadConfig();
+    cfg = loadConfig(msg.guild.id);
     ensureFutureDrop();
 
     console.log("[TEMPLE] scheduler started");
