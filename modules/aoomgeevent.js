@@ -9,22 +9,22 @@ import path from "path";
 
 export function setupAooMgeEvent(client) {
 
-/* ================== BASIC CONFIG ================== */
+/* ================= CONFIG ================= */
 
 const PREFIX = "!";
 const ICS_URL = process.env.ICS_URL;
 const DATA_FILE = path.resolve("./modules/aooData.json");
 
-/* ================== STORAGE ================== */
+/* ================= STORAGE ================= */
 
 function loadDB() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE)); }
+  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
   catch { return {}; }
 }
 function saveDB(db) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
 }
-function guildDB(guildId) {
+function getGuild(guildId) {
   const db = loadDB();
   db[guildId] ??= {
     pingChannel: null,
@@ -37,35 +37,34 @@ function guildDB(guildId) {
   return db[guildId];
 }
 
-/* ================== HELPERS ================== */
+/* ================= HELPERS ================= */
 
-function isOwner(msg) {
-  return msg.guild.ownerId === msg.author.id;
-}
-function hasAooAccess(member, g) {
-  return g.aooAccessRole && member.roles.cache.has(g.aooAccessRole);
-}
-function formatUTC(d) {
-  return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
-}
-function addHours(d, h) {
-  return new Date(d.getTime() + h * 3600000);
-}
+const isOwner = (m) => m.guild.ownerId === m.author.id;
+const hasAccess = (m, g) =>
+  isOwner(m) || (g.aooAccessRole && m.roles.cache.has(g.aooAccessRole));
+
+const formatUTC = d =>
+  d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+
+const addHours = (d, h) => new Date(d.getTime() + h * 3600000);
+
 async function fetchEvents() {
   const data = await ical.fromURL(ICS_URL);
   return Object.values(data).filter(e => e?.type === "VEVENT");
 }
+
 function getType(ev) {
-  const t = [ev.summary, ev.description].join("\n");
+  const t = [ev.summary, ev.description, ev.location].join("\n");
   const m = t.match(/Type:\s*(\w+)/i);
   return m?.[1]?.toLowerCase();
 }
 
-/* ================== SCHEDULER ================== */
+/* ================= SCHEDULER ================= */
 
 function schedule(g, time, channelId, text) {
   g.scheduled.push({ time, channelId, text, sent: false });
 }
+
 async function runScheduler() {
   const db = loadDB();
   const now = Date.now();
@@ -74,7 +73,7 @@ async function runScheduler() {
     const g = db[gid];
     for (const s of g.scheduled) {
       if (!s.sent && now >= s.time) {
-        const ch = await client.channels.fetch(s.channelId);
+        const ch = await client.channels.fetch(s.channelId).catch(() => null);
         if (ch?.isTextBased()) {
           const msg = await ch.send(s.text);
           await msg.react("🏆").catch(() => {});
@@ -87,19 +86,17 @@ async function runScheduler() {
   saveDB(db);
 }
 
-/* ================== READY ================== */
-
 client.once("ready", () => {
   setInterval(runScheduler, 30_000);
 });
 
-/* ================== COMMANDS ================== */
+/* ================= COMMANDS ================= */
 
 client.on("messageCreate", async msg => {
   if (!msg.guild || msg.author.bot) return;
   if (!msg.content.startsWith(PREFIX)) return;
 
-  const g = guildDB(msg.guild.id);
+  const g = getGuild(msg.guild.id);
   const [cmd] = msg.content.slice(1).split(" ");
 
   /* ----- OWNER CONFIG ----- */
@@ -132,7 +129,11 @@ client.on("messageCreate", async msg => {
 
   if (cmd === "status") {
     return msg.reply(
-      `Channel: ${g.pingChannel}\nAOO role: ${g.aooRole}\nMGE role: ${g.mgeRole}\nAOO access: ${g.aooAccessRole}\nScheduled: ${g.scheduled.length}`
+      `Channel: ${g.pingChannel}
+AOO role: ${g.aooRole}
+MGE role: ${g.mgeRole}
+AOO access: ${g.aooAccessRole}
+Scheduled: ${g.scheduled.length}`
     );
   }
 
@@ -140,70 +141,145 @@ client.on("messageCreate", async msg => {
 
   if (cmd === "next_ping") {
     const n = g.scheduled.sort((a,b)=>a.time-b.time)[0];
-    return msg.reply(n ? `Next: ${formatUTC(new Date(n.time))}` : "None");
+    return msg.reply(n ? `Next ping: ${formatUTC(new Date(n.time))}` : "No scheduled pings");
   }
 
-  if (cmd === "scheduled") {
+  if (cmd === "scheduled_30d") {
+    const now = Date.now();
+    const limit = now + 30*24*60*60*1000;
+    const list = g.scheduled
+      .filter(s => s.time <= limit)
+      .sort((a,b)=>a.time-b.time);
+
     return msg.reply(
-      g.scheduled.map(s => formatUTC(new Date(s.time))).join("\n") || "None"
+      list.length
+        ? list.map(s => formatUTC(new Date(s.time))).join("\n")
+        : "No scheduled pings in next 30 days"
     );
   }
 
-  /* ----- AOO DROPDOWN ----- */
+  /* ----- CALENDAR INFO ----- */
+
+  if (cmd === "next_mge") {
+    const events = await fetchEvents();
+    const ev = events
+      .filter(e => getType(e) === "mge")
+      .map(e => new Date(e.start))
+      .find(d => d > new Date());
+
+    return msg.reply(
+      ev ? `Next MGE: **${formatUTC(ev)}**` : "No upcoming MGE"
+    );
+  }
+
+  if (cmd === "calendar_week") {
+    const now = new Date();
+    const end = new Date(now.getTime() + 7*24*60*60*1000);
+    const events = await fetchEvents();
+
+    const list = events
+      .map(e => ({ d: new Date(e.start), t: getType(e) }))
+      .filter(e => e.d >= now && e.d <= end)
+      .slice(0, 10);
+
+    return msg.reply(
+      list.length
+        ? list.map(e => `${formatUTC(e.d)} — ${e.t}`).join("\n")
+        : "No events in next 7 days"
+    );
+  }
+
+  /* ----- AOO DATE + HOUR DROPDOWN ----- */
 
   if (cmd === "aoo") {
-    if (!hasAooAccess(msg.member, g) && !isOwner(msg))
-      return msg.reply("❌ No access");
+    if (!hasAccess(msg.member, g)) return msg.reply("❌ No access");
 
     const events = await fetchEvents();
-    const aoo = events.find(e => getType(e) === "ark_battle");
-    if (!aoo) return msg.reply("No AOO found");
+    const ev = events.find(e => getType(e) === "ark_battle");
+    if (!ev) return msg.reply("No upcoming AOO found");
 
-    const start = new Date(aoo.start);
-    const end = new Date(aoo.end);
+    const start = new Date(ev.start);
+    const end = new Date(ev.end);
 
-    const options = [];
-    for (let h = 0; h < 24; h++) {
-      const t = new Date(Date.UTC(
-        start.getUTCFullYear(),
-        start.getUTCMonth(),
-        start.getUTCDate(),
-        h
-      ));
-      if (t >= start && t <= end) {
-        options.push({ label: `${h}:00 UTC`, value: String(t.getTime()) });
-      }
+    const days = [];
+    const d = new Date(Date.UTC(
+      start.getUTCFullYear(),
+      start.getUTCMonth(),
+      start.getUTCDate()
+    ));
+
+    while (d <= end) {
+      days.push(new Date(d));
+      d.setUTCDate(d.getUTCDate() + 1);
     }
 
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId("aoo_time")
-        .setPlaceholder("Pick AOO time")
-        .addOptions(options)
+        .setCustomId("aoo_day")
+        .setPlaceholder("Select AOO date (UTC)")
+        .addOptions(
+          days.map(x => ({
+            label: x.toISOString().slice(0,10),
+            value: x.toISOString().slice(0,10)
+          }))
+        )
     );
 
-    return msg.reply({ content: "Pick AOO start time:", components: [row] });
+    return msg.reply({ content: "Select AOO date:", components: [row] });
   }
 
   if (cmd === "help") {
-    return msg.reply("Commands: set_*, aoo, status, next_ping, scheduled");
+    return msg.reply(
+      `Commands:
+!aoo
+!next_ping
+!scheduled_30d
+!next_mge
+!calendar_week
+!status`
+    );
   }
 });
 
-/* ================== DROPDOWN ================== */
+/* ================= DROPDOWNS ================= */
 
 client.on("interactionCreate", async i => {
   if (!i.isStringSelectMenu()) return;
-  if (i.customId !== "aoo_time") return;
+  const g = getGuild(i.guild.id);
 
-  const g = guildDB(i.guild.id);
-  const startMs = Number(i.values[0]);
+  /* ----- DATE PICK ----- */
+  if (i.customId === "aoo_day") {
+    const date = i.values[0];
+    const options = [];
 
-  schedule(g, startMs - 30*60*1000, g.pingChannel, "⏰ AOO starts in 30 min!");
-  schedule(g, startMs - 10*60*1000, g.pingChannel, "⏰ AOO starts in 10 min!");
+    for (let h=0; h<24; h++) {
+      options.push({
+        label: `${h}:00 UTC`,
+        value: `${date}|${h}`
+      });
+    }
 
-  saveDB(loadDB());
-  await i.update({ content: "✅ AOO reminders scheduled", components: [] });
+    const row = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("aoo_hour")
+        .setPlaceholder("Select hour (UTC)")
+        .addOptions(options)
+    );
+
+    return i.update({ content: `Date selected: **${date}**`, components: [row] });
+  }
+
+  /* ----- HOUR PICK ----- */
+  if (i.customId === "aoo_hour") {
+    const [date, hour] = i.values[0].split("|");
+    const startMs = Date.parse(`${date}T${hour.padStart(2,"0")}:00:00Z`);
+
+    schedule(g, startMs - 30*60*1000, g.pingChannel, "🏆 AOO starts in **30 minutes**!");
+    schedule(g, startMs - 10*60*1000, g.pingChannel, "🏆 AOO starts in **10 minutes**!");
+
+    saveDB(loadDB());
+    return i.update({ content: "✅ AOO reminders scheduled", components: [] });
+  }
 });
 
 }
