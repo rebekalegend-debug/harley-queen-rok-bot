@@ -1,3 +1,5 @@
+console.log("🔥 VERIFY BOT BUILD 2026-02-09 FINAL");
+
 const {
   Client,
   GatewayIntentBits,
@@ -319,3 +321,4 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.login(TOKEN);
+
