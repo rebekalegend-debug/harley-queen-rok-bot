@@ -22,8 +22,8 @@ const TOKEN = process.env.TOKEN;
 const HARLEY_QUINN_USER_ID = "297057337590546434";
 
 // =====================
-// CSV CONFIG (same folder as index.js)
-// Your CSV headers (as in your screenshot): Name,ID
+// CSV CONFIG (same folder as this index.js)
+// CSV headers: Name,ID
 // =====================
 const DATA_FILE = path.join(__dirname, "DATA.csv");
 
@@ -36,10 +36,8 @@ function sanitizeName(raw) {
 }
 
 function readCsvRecords() {
-  if (!fs.existsSync(DATA_FILE)) throw new Error("DATA.csv not found next to index.js");
+  if (!fs.existsSync(DATA_FILE)) throw new Error(`DATA.csv not found at ${DATA_FILE}`);
   const csvText = fs.readFileSync(DATA_FILE, "utf8");
-
-  // columns:true means it uses header row: Name,ID
   return parse(csvText, {
     columns: true,
     skip_empty_lines: true,
@@ -49,12 +47,12 @@ function readCsvRecords() {
 
 function lookupNameByGovernorId(governorId) {
   const records = readCsvRecords();
+  const target = String(governorId).trim();
 
-  // CSV headers: Name,ID
   for (const row of records) {
     const id = String(row.ID ?? "").trim();
     const name = String(row.Name ?? "").trim();
-    if (id === String(governorId)) return name || null;
+    if (id === target) return name || null;
   }
   return null;
 }
@@ -124,7 +122,9 @@ client.on(Events.MessageCreate, async (message) => {
         "**Verify Commands**\n\n" +
         "`!verify set channel #channel` – set verify channel\n" +
         "`!verify set role @role` – role given after verify\n" +
-        "`!verify status` – show current setup"
+        "`!verify status` – show current setup\n" +
+        "`!verify dump` – show saved JSON for this server\n" +
+        "`!verify testsave` – write a test value and show JSON"
       );
     }
 
@@ -134,6 +134,19 @@ client.on(Events.MessageCreate, async (message) => {
         `• Channel: ${verifyCfg.channelId ? `<#${verifyCfg.channelId}>` : "not set"}\n` +
         `• Role: ${verifyCfg.roleId ? `<@&${verifyCfg.roleId}>` : "not set"}`
       );
+    }
+
+    // NEW: dump current saved config for this guild
+    if (sub === "dump") {
+      const cfg = getGuild(guildId);
+      return message.reply("```json\n" + JSON.stringify(cfg, null, 2) + "\n```");
+    }
+
+    // NEW: force a save and show it (proves persistence)
+    if (sub === "testsave") {
+      setGuild(guildId, { _test: { savedAt: new Date().toISOString() } });
+      const cfg = getGuild(guildId);
+      return message.reply("Saved. Current config:\n```json\n" + JSON.stringify(cfg, null, 2) + "\n```");
     }
 
     if (sub === "set") {
@@ -174,15 +187,12 @@ client.on(Events.MessageCreate, async (message) => {
     /\.(png|jpg|jpeg|webp|gif)$/i.test(att.name || "")
   );
 
-  // if no image OR they already uploaded screenshot => delete
   if (!hasImage || screenshotDone.get(member.id)) {
     return message.delete().catch(() => {});
   }
 
-  // Mark screenshot uploaded
   screenshotDone.set(member.id, true);
 
-  // Show button to enter Governor ID
   const button = new ButtonBuilder()
     .setCustomId(`verify_id:${member.id}`)
     .setLabel("Enter Governor ID")
@@ -237,18 +247,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.reply({ content: "This form isn’t for you.", ephemeral: true });
       }
 
-      if (!verifyCfg.roleId) {
+      if (!verifyCfg.roleId || !verifyCfg.channelId) {
         return interaction.reply({
-          content: "❌ Verify role is not set. Admin must run: `!verify set role @role`",
+          content: "❌ Verify is not configured. Admin must set channel + role with `!verify set ...`",
           ephemeral: true
         });
       }
 
       const member = interaction.member;
-
       const rawId = interaction.fields.getTextInputValue("governor_id").trim();
 
-      // Numbers only
       if (!/^\d+$/.test(rawId)) {
         return interaction.reply({
           content: "❌ Governor ID must contain numbers only.",
@@ -256,7 +264,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
       }
 
-      // Lookup name in DATA.csv
       let nameFromDb = null;
       try {
         nameFromDb = lookupNameByGovernorId(rawId);
@@ -294,7 +301,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await member.setNickname(cleanName);
       await member.roles.add(verifyCfg.roleId);
 
-      // Remove button message (best-effort)
       if (interaction.message) {
         await interaction.message.edit({
           content: `✅ All set, ${interaction.user}! Enjoy the server.`,
@@ -313,6 +319,3 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.login(TOKEN);
-
-
-
