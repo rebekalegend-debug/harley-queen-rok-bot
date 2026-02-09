@@ -47,6 +47,28 @@ export function setupRuinsPinger(client) {
       .slice(1)
       .split(/\s+/);
 
+
+    if (cmd === "ruins" && sub === "help") {
+  return msg.reply(
+    "**🗿 Ruins / Altar Commands**\n\n" +
+    "**Setup (Admin)**\n" +
+    "`!ruins set channel #channel`\n" +
+    "`!ruins set role @role`\n\n" +
+    "**Add Dates**\n" +
+    "`!ruins add` *(paste dates on new lines)*\n" +
+    "`!altar add` *(paste dates on new lines)*\n\n" +
+    "**View**\n" +
+    "`!ruins list`\n" +
+    "`!altar list`\n" +
+    "`!ruins upcoming`\n" +
+    "`!ruins all`\n\n" +
+    "**Maintenance**\n" +
+    "`!ruins test`\n" +
+    "`!ruins clear`\n" +
+    "`!altar clear`\n" +
+    "`!ruins clear notified`"
+  );
+}
     // ---------- SETUP ----------
     if (cmd === "ruins") {
       if (!isAdmin) return msg.reply("❌ Admin only.");
