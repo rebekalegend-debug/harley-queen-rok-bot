@@ -77,6 +77,13 @@ function startHttpKeepAliveOnce() {
     })
     .listen(PORT, () => console.log(`🌐 HTTP server listening on ${PORT}`));
 }
+function isAdminPerm(member) {
+  return member?.permissions?.has?.(PermissionFlagsBits.Administrator);
+}
+
+function isOwner(guild, userId) {
+  return guild?.ownerId === userId;
+}
 
 // =====================
 // EXPORT: setupVerify(client)
@@ -129,6 +136,10 @@ After that, click the button to unlock the server.`
     if (message.content.startsWith("!verify")) {
       const args = message.content.split(/\s+/);
       const sub = (args[1] || "help").toLowerCase();
+    // 🔒 LOCK VERIFY COMMANDS: Owner or Administrator only
+    if (!isOwner(message.guild, message.author.id) && !isAdminPerm(message.member)) {
+      return message.reply("❌ You don’t have permission to use verify admin commands.");
+    }
 
       if (sub === "help") {
         return message.reply(
