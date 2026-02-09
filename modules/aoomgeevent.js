@@ -7,7 +7,7 @@ import ical from "node-ical";
 import fs from "fs";
 import path from "path";
 
-export function setupAooMgeEvent(client) {
+export function registerAooMgeEvent(client) {
 
 /* ================== BASIC CONFIG ================== */
 
