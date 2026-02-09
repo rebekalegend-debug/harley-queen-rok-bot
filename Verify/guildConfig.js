@@ -1,9 +1,18 @@
-
 const fs = require("fs");
 const path = require("path");
 
-const FILE = path.join(process.env.DATA_DIR || __dirname, "guilds.json");
+// Prefer persistent storage (Railway Volume). Fallback to local folder.
+const BASE_DIR = process.env.DATA_DIR || __dirname;
+const FILE = path.join(BASE_DIR, "guilds.json");
 
+// Ensure directory exists (important for /data)
+try {
+  fs.mkdirSync(BASE_DIR, { recursive: true });
+} catch (e) {
+  console.error("❌ Cannot create BASE_DIR:", BASE_DIR, e);
+}
+
+console.log("📦 guildConfig storage:", FILE);
 
 function load() {
   try {
@@ -14,16 +23,15 @@ function load() {
 }
 
 function save(data) {
-  fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
+  fs.writeFileSync(FILE, JSON.stringify(data, null, 2), "utf8");
+  console.log("💾 Saved guilds.json:", FILE);
 }
 
 function deepMerge(a, b) {
   if (typeof a !== "object" || !a) return b;
   if (typeof b !== "object" || !b) return b;
   const out = { ...a };
-  for (const k of Object.keys(b)) {
-    out[k] = deepMerge(a[k], b[k]);
-  }
+  for (const k of Object.keys(b)) out[k] = deepMerge(a[k], b[k]);
   return out;
 }
 
@@ -32,11 +40,4 @@ function getGuild(guildId) {
   return db[guildId] ?? {};
 }
 
-function setGuild(guildId, patch) {
-  const db = load();
-  db[guildId] = deepMerge(db[guildId] ?? {}, patch);
-  save(db);
-  return db[guildId];
-}
-
-module.exports = { getGuild, setGuild };
+function
