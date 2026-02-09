@@ -16,7 +16,7 @@ const DEFAULTS = {
   nextShieldDropISO: null
 };
 
-// ensure /data exists
+// Ensure /data directory exists
 try {
   fs.mkdirSync(BASE_DIR, { recursive: true });
 } catch (e) {
@@ -48,4 +48,6 @@ export function saveConfig(guildId, cfg) {
   try {
     fs.writeFileSync(FILE, JSON.stringify(cfg, null, 2), "utf8");
   } catch (e) {
-    console.error("[TEMPLE][CONFIG] s
+    console.error("[TEMPLE][CONFIG] save error:", e);
+  }
+}
