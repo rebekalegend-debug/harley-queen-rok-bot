@@ -12,6 +12,10 @@ function fmtUTC(d) {
   return d.toUTCString();
 }
 
+function isAdmin(member) {
+  return member.permissions.has("ManageGuild");
+}
+
 function parseDateTimeWithTZ(dateStr, timeStr, tzStr) {
   const [Y, M, D] = dateStr.split("-").map(Number);
   const [h, m] = timeStr.split(":").map(Number);
