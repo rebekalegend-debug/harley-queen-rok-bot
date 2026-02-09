@@ -1,13 +1,13 @@
 {
   "name": "harley-queen-rok-bot",
   "version": "1.0.0",
-  "main": "index.js",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "discord.js": "^14.16.0",
-    "csv-parse": "^5.5.6"
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5"
   }
 }
