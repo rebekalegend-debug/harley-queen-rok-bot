@@ -1,9 +1,8 @@
-// temple/templePinger.js
-import { Partials } from "discord.js";
-import { loadConfig, saveConfig } from "./storage.js"; // adjust path if needed
+/// modules/templePinger.js
+import { loadConfig, saveConfig } from "./storage.js";
 
 const PREFIX = "$";
-const CHECK_EVERY_MS = 30 * 1000; // 30s checks
+const CHECK_EVERY_MS = 30 * 1000;
 
 let cfg = null;
 let lastPingedForDropISO = null;
@@ -30,6 +29,7 @@ function parseDateTimeWithTZ(dateStr, timeStr, tzStr) {
     offsetMinutes = sign * (oh * 60 + om);
   }
 
+  // local time at tz -> UTC
   const utcMs = Date.UTC(Y, M - 1, D, h, m) - offsetMinutes * 60 * 1000;
   const dObj = new Date(utcMs);
   if (Number.isNaN(dObj.getTime())) return null;
@@ -93,23 +93,35 @@ async function tickScheduler(client) {
   if (!t) return;
 
   const { drop, pingAt } = t;
-
   const now = Date.now();
+
   if (now >= pingAt.getTime()) {
     if (lastPingedForDropISO !== drop.toISOString()) {
       try {
         await sendPing(client, drop);
         advanceOneCycle();
       } catch (e) {
-        console.error("[TEMPLE PING ERROR]", e);
+        console.error("[TEMPLE][PING ERROR]", e);
       }
     }
   }
 }
 
 function statusText() {
+  if (!cfg?.targetChannelId || !cfg?.pingRoleId) {
+    return (
+      `Temple pinger not configured.\n` +
+      `Set env vars: TEMPLE_CHANNEL_ID and TEMPLE_PING_ROLE_ID\n` +
+      `Then restart bot.`
+    );
+  }
+
   if (!cfg?.nextShieldDropISO) {
-    return `No shield drop set.\nUse: \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\`\nExample: \`${PREFIX}setdrop 2026-02-13 18:31 +02:00\``;
+    return (
+      `No shield drop set.\n` +
+      `Use: \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\`\n` +
+      `Example: \`${PREFIX}setdrop 2026-02-13 18:31 +02:00\``
+    );
   }
 
   ensureFutureDrop();
@@ -142,15 +154,14 @@ function statusText() {
   return lines.join("\n");
 }
 
-/**
- * ✅ Call this ONCE from your main bot file after client is created.
- */
 export function setupTemplePinger(client) {
-  // Load config once
+  // load config once on boot
   cfg = loadConfig();
   ensureFutureDrop();
 
-  // COMMANDS (keeps your same $ commands)
+  console.log("[TEMPLE] module registered");
+
+  // commands
   client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
     if (!msg.content.startsWith(PREFIX)) return;
@@ -161,14 +172,14 @@ export function setupTemplePinger(client) {
     if (cmd === "help") {
       return msg.reply({
         content:
-          `**Commands**\n` +
+          `**Temple Commands**\n` +
           `• \`${PREFIX}help\`\n` +
-          `• \`${PREFIX}status\` — shows shield/drop/reshield/ping times\n` +
-          `• \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\` — set next shield drop\n` +
+          `• \`${PREFIX}status\`\n` +
+          `• \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\`\n` +
           `   Example: \`${PREFIX}setdrop 2026-02-13 18:31 +02:00\`\n` +
-          `• \`${PREFIX}cycle <days>\` — set repeat cycle (6/7/etc)\n` +
-          `• \`${PREFIX}pinghours <hours>\` — set ping offset (default 24)\n` +
-          `• \`${PREFIX}pingtest\` — sends a test ping in the channel`,
+          `• \`${PREFIX}cycle <days>\`\n` +
+          `• \`${PREFIX}pinghours <hours>\`\n` +
+          `• \`${PREFIX}pingtest\``,
         allowedMentions: { repliedUser: false }
       });
     }
@@ -211,6 +222,7 @@ export function setupTemplePinger(client) {
       const hours = Number(args[0]);
       if (!Number.isFinite(hours) || hours < 1 || hours > 168) {
         return msg.reply(`Usage: \`${PREFIX}pinghours 24\` (1–168)`);
+
       }
       cfg.pingHoursBefore = hours;
       saveConfig(cfg);
@@ -220,12 +232,18 @@ export function setupTemplePinger(client) {
 
     if (cmd === "pingtest") {
       try {
+        if (!cfg?.targetChannelId || !cfg?.pingRoleId) {
+          return msg.reply("❌ Missing TEMPLE_CHANNEL_ID / TEMPLE_PING_ROLE_ID config.");
+        }
+
         const channel = await client.channels.fetch(cfg.targetChannelId).catch(() => null);
         if (!channel || !channel.isTextBased()) return msg.reply("Target channel not found.");
+
         await channel.send({
           content: `<@&${cfg.pingRoleId}> Wake up! Throphyes time!`,
           allowedMentions: { roles: [cfg.pingRoleId] }
         });
+
         return msg.reply("✅ Test ping sent.");
       } catch (e) {
         console.error(e);
@@ -236,7 +254,7 @@ export function setupTemplePinger(client) {
     return msg.reply(`Unknown command. Use \`${PREFIX}help\``);
   });
 
-  // START SCHEDULER ONCE (even if you reload modules)
+  // scheduler (start once)
   client.once("ready", () => {
     if (schedulerStarted) return;
     schedulerStarted = true;
@@ -244,12 +262,13 @@ export function setupTemplePinger(client) {
     cfg = loadConfig();
     ensureFutureDrop();
 
-    console.log("[TEMPLE] module loaded");
-    console.log(`[TEMPLE] channel=${cfg.targetChannelId} role=${cfg.pingRoleId} cycleDays=${cfg.cycleDays} pingHoursBefore=${cfg.pingHoursBefore}`);
+    console.log("[TEMPLE] scheduler started");
+    console.log(
+      `[TEMPLE] channel=${cfg.targetChannelId} role=${cfg.pingRoleId} cycleDays=${cfg.cycleDays} pingHoursBefore=${cfg.pingHoursBefore}`
+    );
 
     setInterval(() => {
-      tickScheduler(client).catch((e) => console.error("[TEMPLE SCHED ERROR]", e));
+      tickScheduler(client).catch((e) => console.error("[TEMPLE][SCHED ERROR]", e));
     }, CHECK_EVERY_MS);
   });
 }
-
