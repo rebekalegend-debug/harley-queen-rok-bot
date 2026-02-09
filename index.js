@@ -5,6 +5,7 @@ import { Client, GatewayIntentBits, Partials } from "discord.js";
 // import modules
 import { setupVerify } from "./modules/verify.js";
 import { setupTemplePinger } from "./modules/templePinger.js";
+import { setupRuinsPinger } from "./modules/ruinsPinger.js";
 
 // create ONE client
 const client = new Client({
@@ -20,6 +21,7 @@ const client = new Client({
 // attach modules
 setupVerify(client);
 setupTemplePinger(client);
+setupRuinsPinger(client);
 
 // login ONCE
 client.login(process.env.DISCORD_TOKEN);
