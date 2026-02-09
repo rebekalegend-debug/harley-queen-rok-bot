@@ -4,12 +4,26 @@ import { loadConfig, saveConfig } from "./storage.js";
 const PREFIX = "$";
 const CHECK_EVERY_MS = 30 * 1000;
 
-let cfg = null;
-let lastPingedForDropISO = null;
+// Per-guild runtime state
+const cfgCache = new Map(); // guildId -> cfg
+const lastPingedForDropISO = new Map(); // guildId -> dropISO
 let schedulerStarted = false;
 
 function fmtUTC(d) {
   return d.toUTCString();
+}
+
+function getCfg(guildId) {
+  const cached = cfgCache.get(guildId);
+  if (cached) return cached;
+  const cfg = loadConfig(guildId);
+  cfgCache.set(guildId, cfg);
+  return cfg;
+}
+
+function persistCfg(guildId, cfg) {
+  cfgCache.set(guildId, cfg);
+  saveConfig(guildId, cfg);
 }
 
 function parseDateTimeWithTZ(dateStr, timeStr, tzStr) {
@@ -35,13 +49,13 @@ function parseDateTimeWithTZ(dateStr, timeStr, tzStr) {
   return dObj;
 }
 
-function ensureFutureDrop() {
+function ensureFutureDrop(guildId, cfg) {
   if (!cfg?.nextShieldDropISO) return;
 
   let d = new Date(cfg.nextShieldDropISO);
   if (Number.isNaN(d.getTime())) {
     cfg.nextShieldDropISO = null;
-    saveConfig(msg.guild.id, cfg);
+    persistCfg(guildId, cfg);
     return;
   }
 
@@ -50,10 +64,10 @@ function ensureFutureDrop() {
   }
 
   cfg.nextShieldDropISO = d.toISOString();
-  saveConfig(msg.guild.id, cfg);
+  persistCfg(guildId, cfg);
 }
 
-function computeTimes() {
+function computeTimes(cfg) {
   if (!cfg?.nextShieldDropISO) return null;
 
   const drop = new Date(cfg.nextShieldDropISO);
@@ -65,7 +79,7 @@ function computeTimes() {
   return { drop, pingAt, reshieldAt };
 }
 
-async function sendPing(client, dropDate) {
+async function sendPing(client, cfg) {
   const channel = await client.channels.fetch(cfg.targetChannelId).catch(() => null);
   if (!channel || !channel.isTextBased()) throw new Error("Target channel not found or not text-based.");
 
@@ -73,32 +87,33 @@ async function sendPing(client, dropDate) {
     content: `<@&${cfg.pingRoleId}> Wake up! Throphyes time!`,
     allowedMentions: { roles: [cfg.pingRoleId] }
   });
-
-  lastPingedForDropISO = dropDate.toISOString();
 }
 
-function advanceOneCycle() {
+function advanceOneCycle(guildId, cfg) {
   const d = new Date(cfg.nextShieldDropISO);
   const next = new Date(d.getTime() + cfg.cycleDays * 24 * 60 * 60 * 1000);
   cfg.nextShieldDropISO = next.toISOString();
-  saveConfig(msg.guild.id, cfg);
+  persistCfg(guildId, cfg);
 }
 
-async function tickScheduler(client) {
+async function tickSchedulerForGuild(client, guildId) {
+  const cfg = getCfg(guildId);
   if (!cfg?.nextShieldDropISO) return;
 
-  ensureFutureDrop();
-  const t = computeTimes();
+  ensureFutureDrop(guildId, cfg);
+  const t = computeTimes(cfg);
   if (!t) return;
 
   const { drop, pingAt } = t;
   const now = Date.now();
 
   if (now >= pingAt.getTime()) {
-    if (lastPingedForDropISO !== drop.toISOString()) {
+    const dropISO = drop.toISOString();
+    if (lastPingedForDropISO.get(guildId) !== dropISO) {
       try {
-        await sendPing(client, drop);
-        advanceOneCycle();
+        await sendPing(client, cfg);
+        lastPingedForDropISO.set(guildId, dropISO);
+        advanceOneCycle(guildId, cfg);
       } catch (e) {
         console.error("[TEMPLE][PING ERROR]", e);
       }
@@ -106,18 +121,17 @@ async function tickScheduler(client) {
   }
 }
 
-function statusText() {
+function statusText(guildId, cfg) {
   if (!cfg?.targetChannelId || !cfg?.pingRoleId) {
     return (
       `Temple pinger not configured yet.\n` +
-      `Owner/Admin must run:\n` +
+      `Admin must run:\n` +
       `• \`${PREFIX}temple set channel #channel\`\n` +
       `• \`${PREFIX}temple set role @role\`\n` +
       `Then set the next drop with:\n` +
       `• \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\``
     );
   }
-
 
   if (!cfg?.nextShieldDropISO) {
     return (
@@ -127,8 +141,8 @@ function statusText() {
     );
   }
 
-  ensureFutureDrop();
-  const t = computeTimes();
+  ensureFutureDrop(guildId, cfg);
+  const t = computeTimes(cfg);
   if (!t) return "Stored shield drop time is invalid. Please set it again.";
 
   const { drop, pingAt, reshieldAt } = t;
@@ -158,261 +172,223 @@ function statusText() {
   return lines.join("\n");
 }
 
-// -------- Permission model (RESTRICTED ONLY) --------
+// Permissions
 async function isGuildOwner(msg) {
-  if (!msg.guild) return false;
   const ownerId = msg.guild.ownerId || (await msg.guild.fetchOwner().then(o => o.id).catch(() => null));
   return ownerId && msg.author.id === ownerId;
 }
 
-async function canUseTemple(msg) {
-  // server owner always allowed
+function isAdmin(msg) {
+  return msg.member?.permissions?.has?.("ManageGuild");
+}
+
+async function canUseTemple(msg, cfg) {
   if (await isGuildOwner(msg)) return true;
-
-  // allowed role
   if (cfg?.allowedRoleId && msg.member?.roles?.cache?.has(cfg.allowedRoleId)) return true;
-
   return false;
 }
 
 export function setupTemplePinger(client) {
-  cfg = loadConfig(msg.guild.id);
-  ensureFutureDrop();
-
   console.log("[TEMPLE] module registered");
 
+  // Commands
   client.on("messageCreate", async (msg) => {
-    if (msg.author.bot) return;
-    if (!msg.guild) return;
-    if (!msg.content.startsWith(PREFIX)) return;
-
-    const args = msg.content.slice(PREFIX.length).trim().split(/\s+/);
-    const cmd = (args.shift() ?? "").toLowerCase();
-    // =========================
-    // $temple ... (CONFIG COMMANDS)
-    // - set channel / set role: Admin-only (Manage Server)
-    // - access role: Server Owner only
-    // =========================
-    if (cmd === "temple") {
+    try {
+      if (msg.author.bot) return;
       if (!msg.guild) return;
+      if (!msg.content.startsWith(PREFIX)) return;
 
-      const sub = (args.shift() ?? "").toLowerCase();
+      const guildId = msg.guild.id;
+      const cfg = getCfg(guildId);
+      ensureFutureDrop(guildId, cfg);
 
-      // --- helper checks ---
-      const isAdmin = msg.member?.permissions?.has?.("ManageGuild");
-      const isOwner = msg.author.id === msg.guild.ownerId;
+      const args = msg.content.slice(PREFIX.length).trim().split(/\s+/);
+      const cmd = (args.shift() ?? "").toLowerCase();
 
-      // $temple show
-      if (sub === "show" || sub === "status") {
-        return msg.reply({ content: statusText(), allowedMentions: { roles: [] } });
-      }
+      // =========================
+      // $temple ... (CONFIG + PERMISSIONS)
+      // =========================
+      if (cmd === "temple") {
+        const sub = (args.shift() ?? "").toLowerCase();
 
-      // $temple set channel #channel  (Admin)
-      if (sub === "set" && (args[0] ?? "").toLowerCase() === "channel") {
-        if (!isAdmin) return msg.reply("❌ You need **Manage Server** to set the temple channel.");
-        const ch = msg.mentions.channels.first();
-        if (!ch) return msg.reply("Usage: `$temple set channel #channel`");
-
-        cfg.targetChannelId = ch.id;
-        saveConfig(msg.guild.id, cfg);
-        return msg.reply(`✅ Temple channel set to ${ch}`);
-      }
-
-      // $temple set role @role (Admin)
-      if (sub === "set" && (args[0] ?? "").toLowerCase() === "role") {
-        if (!isAdmin) return msg.reply("❌ You need **Manage Server** to set the temple role.");
-        const role = msg.mentions.roles.first();
-        if (!role) return msg.reply("Usage: `$temple set role @role`");
-
-        cfg.pingRoleId = role.id;
-        saveConfig(msg.guild.id, cfg);
-        return msg.reply(`✅ Temple ping role set to **${role.name}**`);
-      }
-
-      // $temple access @Role (Owner)
-      if (sub === "access") {
-        if (!isOwner) return msg.reply("❌ Only the **Server Owner** can set Temple access role.");
-
-        // $temple access clear
-        if ((args[0] ?? "").toLowerCase() === "clear") {
-          cfg.allowedRoleId = null;
-          saveConfig(msg.guild.id, cfg);
-          return msg.reply("✅ Temple access role cleared.");
+        // $temple show
+        if (sub === "show" || sub === "status") {
+          return msg.reply({ content: statusText(guildId, cfg), allowedMentions: { roles: [] } });
         }
 
-        // $temple access @Role
-        const role = msg.mentions.roles.first();
-        if (!role) return msg.reply("Usage: `$temple access @Role` OR `$temple access clear`");
+        // $temple set channel #channel  (Admin)
+        if (sub === "set" && (args[0] ?? "").toLowerCase() === "channel") {
+          if (!isAdmin(msg)) return msg.reply("❌ You need **Manage Server** to set the temple channel.");
+          const ch = msg.mentions.channels.first();
+          if (!ch) return msg.reply("Usage: `$temple set channel #channel`");
 
-        cfg.allowedRoleId = role.id;
-        saveConfig(msg.guild.id, cfg);
-        return msg.reply(`✅ Temple access role set to **${role.name}**`);
-      }
-
-      return msg.reply(
-        "**Temple Setup Commands**\n" +
-        "`$temple set channel #channel` *(Admin: Manage Server)*\n" +
-        "`$temple set role @role` *(Admin: Manage Server)*\n" +
-        "`$temple show` *(shows status)*\n\n" +
-        "**Temple Permission Commands**\n" +
-        "`$temple access @Role` *(Owner only)*\n" +
-        "`$temple access clear` *(Owner only)*"
-      );
-    }
-
-    // =========================
-    // OWNER-ONLY: set/remove allowed role
-    // =========================
-    if (cmd === "temple") {
-      if (!(await isGuildOwner(msg))) {
-        return msg.reply("❌ Only the **Server Owner** can change Temple permissions.");
-      }
-
-      const sub = (args.shift() ?? "").toLowerCase();
-
-      // $temple access @Role
-      if (sub === "access") {
-        const role = msg.mentions.roles.first();
-        if (!role) return msg.reply("Usage: `$temple access @Role` or `$temple access clear`");
-
-        cfg.allowedRoleId = role.id;
-        saveConfig(msg.guild.id, cfg);
-        return msg.reply(`✅ Temple access role set to **${role.name}**`);
-      }
-
-      // $temple access clear
-      if (sub === "access" && (args[0] ?? "").toLowerCase() === "clear") {
-        cfg.allowedRoleId = null;
-        saveConfig(msg.guild.id, cfg);
-        return msg.reply("✅ Temple access role cleared. Only Server Owner can use Temple commands now.");
-      }
-
-      // allow: $temple show (owner can always see)
-      if (sub === "show" || sub === "status") {
-        return msg.reply({ content: statusText(), allowedMentions: { roles: [] } });
-      }
-
-      return msg.reply(
-        "**Temple Owner Commands**\n" +
-        "`$temple access @Role` — allow that role to use temple commands\n" +
-        "`$temple access clear` — remove allowed role\n" +
-        "`$temple show` — show temple config/status"
-      );
-    }
-
-    // =========================
-    // RESTRICT all temple commands
-    // =========================
-    const templeCmds = ["help", "status", "info", "stat", "setdrop", "cycle", "pinghours", "pingtest"];
-    if (templeCmds.includes(cmd)) {
-      const ok = await canUseTemple(msg);
-      if (!ok) {
-        const req = cfg?.allowedRoleId ? `<@&${cfg.allowedRoleId}>` : "**Server Owner**";
-        return msg.reply(`❌ No permission. Required: ${req}`);
-      }
-    }
-
-    // ----- existing commands -----
-    if (cmd === "help") {
-      return msg.reply({
-        content:
-          `**Temple Commands**\n` +
-          `• \`${PREFIX}help\`\n` +
-          `• \`${PREFIX}status\`\n` +
-          `• \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\`\n` +
-          `• \`${PREFIX}cycle <days>\`\n` +
-          `• \`${PREFIX}pinghours <hours>\`\n` +
-          `• \`${PREFIX}pingtest\`\n\n` +
-          `**Owner Permissions**\n` +
-          `• \`${PREFIX}temple access @Role\`\n` +
-          `• \`${PREFIX}temple access clear\``,
-        allowedMentions: { repliedUser: false }
-      });
-    }
-
-    if (cmd === "status" || cmd === "info" || cmd === "stat") {
-      return msg.reply({ content: statusText(), allowedMentions: { roles: [] } });
-    }
-
-    if (cmd === "setdrop") {
-      const [dateStr, timeStr, tzStr] = args;
-      if (!dateStr || !timeStr || !tzStr) {
-        return msg.reply(`Usage: \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\` (TZ = UTC or +02:00)`);
-      }
-
-      const d = parseDateTimeWithTZ(dateStr, timeStr, tzStr);
-      if (!d) return msg.reply("Invalid format. Example: `$setdrop 2026-02-13 18:31 +02:00`");
-
-      cfg.nextShieldDropISO = d.toISOString();
-      saveConfig(msg.guild.id, cfg);
-      lastPingedForDropISO = null;
-
-      return msg.reply(
-        `✅ Next shield drop set to (UTC): **${fmtUTC(d)}**\n` +
-          `I will ping <@&${cfg.pingRoleId}> in <#${cfg.targetChannelId}> **${cfg.pingHoursBefore}h before**, repeating every **${cfg.cycleDays} days**.`
-      );
-    }
-
-    if (cmd === "cycle") {
-      const days = Number(args[0]);
-      if (!Number.isFinite(days) || days < 1 || days > 30) {
-        return msg.reply(`Usage: \`${PREFIX}cycle 6\` or \`${PREFIX}cycle 7\``);
-      }
-      cfg.cycleDays = days;
-      saveConfig(msg.guild.id, cfg);
-      lastPingedForDropISO = null;
-      return msg.reply(`✅ Cycle updated: **${cfg.cycleDays} days**`);
-    }
-
-    if (cmd === "pinghours") {
-      const hours = Number(args[0]);
-      if (!Number.isFinite(hours) || hours < 1 || hours > 168) {
-        return msg.reply(`Usage: \`${PREFIX}pinghours 24\` (1–168)`);
-      }
-      cfg.pingHoursBefore = hours;
-      saveConfig(msg.guild.id, cfg);
-      lastPingedForDropISO = null;
-      return msg.reply(`✅ Ping offset updated: **${cfg.pingHoursBefore} hours before drop**`);
-    }
-
-    if (cmd === "pingtest") {
-      try {
-        if (!cfg?.targetChannelId || !cfg?.pingRoleId) {
-          return msg.reply("❌ Missing TEMPLE_CHANNEL_ID / TEMPLE_PING_ROLE_ID config.");
+          cfg.targetChannelId = ch.id;
+          persistCfg(guildId, cfg);
+          return msg.reply(`✅ Temple channel set to ${ch}`);
         }
 
-        const channel = await client.channels.fetch(cfg.targetChannelId).catch(() => null);
-        if (!channel || !channel.isTextBased()) return msg.reply("Target channel not found.");
+        // $temple set role @role (Admin)
+        if (sub === "set" && (args[0] ?? "").toLowerCase() === "role") {
+          if (!isAdmin(msg)) return msg.reply("❌ You need **Manage Server** to set the temple role.");
+          const role = msg.mentions.roles.first();
+          if (!role) return msg.reply("Usage: `$temple set role @role`");
 
-        await channel.send({
-          content: `<@&${cfg.pingRoleId}> Wake up! Throphyes time!`,
-          allowedMentions: { roles: [cfg.pingRoleId] }
+          cfg.pingRoleId = role.id;
+          persistCfg(guildId, cfg);
+          return msg.reply(`✅ Temple ping role set to **${role.name}**`);
+        }
+
+        // $temple access ... (Owner only)
+        if (sub === "access") {
+          if (!(await isGuildOwner(msg))) return msg.reply("❌ Only the **Server Owner** can set Temple access role.");
+
+          // $temple access clear
+          if ((args[0] ?? "").toLowerCase() === "clear") {
+            cfg.allowedRoleId = null;
+            persistCfg(guildId, cfg);
+            return msg.reply("✅ Temple access role cleared.");
+          }
+
+          // $temple access @Role
+          const role = msg.mentions.roles.first();
+          if (!role) return msg.reply("Usage: `$temple access @Role` OR `$temple access clear`");
+
+          cfg.allowedRoleId = role.id;
+          persistCfg(guildId, cfg);
+          return msg.reply(`✅ Temple access role set to **${role.name}**`);
+        }
+
+        return msg.reply(
+          "**Temple Setup Commands**\n" +
+          "`$temple set channel #channel` *(Admin: Manage Server)*\n" +
+          "`$temple set role @role` *(Admin: Manage Server)*\n" +
+          "`$temple show`\n\n" +
+          "**Temple Permission Commands**\n" +
+          "`$temple access @Role` *(Owner only)*\n" +
+          "`$temple access clear` *(Owner only)*"
+        );
+      }
+
+      // =========================
+      // RESTRICT ALL TEMPLE COMMANDS
+      // =========================
+      const templeCmds = ["help", "status", "info", "stat", "setdrop", "cycle", "pinghours", "pingtest"];
+      if (templeCmds.includes(cmd)) {
+        const ok = await canUseTemple(msg, cfg);
+        if (!ok) {
+          const req = cfg?.allowedRoleId ? `<@&${cfg.allowedRoleId}>` : "**Server Owner**";
+          return msg.reply(`❌ No permission. Required: ${req}`);
+        }
+      }
+
+      // =========================
+      // TEMPLE COMMANDS
+      // =========================
+      if (cmd === "help") {
+        return msg.reply({
+          content:
+            `**Temple Commands**\n` +
+            `• \`${PREFIX}help\`\n` +
+            `• \`${PREFIX}status\`\n` +
+            `• \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\`\n` +
+            `• \`${PREFIX}cycle <days>\`\n` +
+            `• \`${PREFIX}pinghours <hours>\`\n` +
+            `• \`${PREFIX}pingtest\`\n\n` +
+            `**Setup**\n` +
+            `• \`${PREFIX}temple set channel #channel\` (Admin)\n` +
+            `• \`${PREFIX}temple set role @role\` (Admin)\n` +
+            `• \`${PREFIX}temple access @Role\` (Owner)`,
+          allowedMentions: { repliedUser: false }
         });
-
-        return msg.reply("✅ Test ping sent.");
-      } catch (e) {
-        console.error(e);
-        return msg.reply("❌ Failed to send test ping. Check bot permissions + role mention perms.");
       }
-    }
 
-    return msg.reply(`Unknown command. Use \`${PREFIX}help\``);
+      if (cmd === "status" || cmd === "info" || cmd === "stat") {
+        return msg.reply({ content: statusText(guildId, cfg), allowedMentions: { roles: [] } });
+      }
+
+      if (cmd === "setdrop") {
+        const [dateStr, timeStr, tzStr] = args;
+        if (!dateStr || !timeStr || !tzStr) {
+          return msg.reply(`Usage: \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\` (TZ = UTC or +02:00)`);
+        }
+
+        const d = parseDateTimeWithTZ(dateStr, timeStr, tzStr);
+        if (!d) return msg.reply("Invalid format. Example: `$setdrop 2026-02-13 18:31 +02:00`");
+
+        cfg.nextShieldDropISO = d.toISOString();
+        persistCfg(guildId, cfg);
+        lastPingedForDropISO.delete(guildId);
+
+        return msg.reply(
+          `✅ Next shield drop set to (UTC): **${fmtUTC(d)}**\n` +
+          `I will ping <@&${cfg.pingRoleId}> in <#${cfg.targetChannelId}> **${cfg.pingHoursBefore}h before**, repeating every **${cfg.cycleDays} days**.`
+        );
+      }
+
+      if (cmd === "cycle") {
+        const days = Number(args[0]);
+        if (!Number.isFinite(days) || days < 1 || days > 30) {
+          return msg.reply(`Usage: \`${PREFIX}cycle 6\` or \`${PREFIX}cycle 7\``);
+        }
+        cfg.cycleDays = days;
+        persistCfg(guildId, cfg);
+        lastPingedForDropISO.delete(guildId);
+        return msg.reply(`✅ Cycle updated: **${cfg.cycleDays} days**`);
+      }
+
+      if (cmd === "pinghours") {
+        const hours = Number(args[0]);
+        if (!Number.isFinite(hours) || hours < 1 || hours > 168) {
+          return msg.reply(`Usage: \`${PREFIX}pinghours 24\` (1–168)`);
+        }
+        cfg.pingHoursBefore = hours;
+        persistCfg(guildId, cfg);
+        lastPingedForDropISO.delete(guildId);
+        return msg.reply(`✅ Ping offset updated: **${cfg.pingHoursBefore} hours before drop**`);
+      }
+
+      if (cmd === "pingtest") {
+        try {
+          if (!cfg?.targetChannelId || !cfg?.pingRoleId) {
+            return msg.reply("❌ Not configured. Use `$temple set channel` and `$temple set role`.");
+          }
+
+          const channel = await client.channels.fetch(cfg.targetChannelId).catch(() => null);
+          if (!channel || !channel.isTextBased()) return msg.reply("Target channel not found.");
+
+          await channel.send({
+            content: `<@&${cfg.pingRoleId}> Wake up! Throphyes time!`,
+            allowedMentions: { roles: [cfg.pingRoleId] }
+          });
+
+          return msg.reply("✅ Test ping sent.");
+        } catch (e) {
+          console.error(e);
+          return msg.reply("❌ Failed to send test ping. Check bot permissions + role mention perms.");
+        }
+      }
+
+      return msg.reply(`Unknown command. Use \`${PREFIX}help\``);
+    } catch (e) {
+      console.error("[TEMPLE][MSG ERROR]", e);
+    }
   });
 
+  // Scheduler (runs for each guild)
   client.once("ready", () => {
     if (schedulerStarted) return;
     schedulerStarted = true;
 
-    cfg = loadConfig(msg.guild.id);
-    ensureFutureDrop();
-
     console.log("[TEMPLE] scheduler started");
-    console.log(
-      `[TEMPLE] channel=${cfg.targetChannelId} role=${cfg.pingRoleId} allowedRole=${cfg.allowedRoleId ?? "none"} cycleDays=${cfg.cycleDays} pingHoursBefore=${cfg.pingHoursBefore}`
-    );
 
-    setInterval(() => {
-      tickScheduler(client).catch((e) => console.error("[TEMPLE][SCHED ERROR]", e));
+    setInterval(async () => {
+      try {
+        for (const guildId of client.guilds.cache.keys()) {
+          await tickSchedulerForGuild(client, guildId);
+        }
+      } catch (e) {
+        console.error("[TEMPLE][SCHED ERROR]", e);
+      }
     }, CHECK_EVERY_MS);
   });
 }
