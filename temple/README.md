@@ -1,1 +1,0 @@
-# rok-temple-pinger
