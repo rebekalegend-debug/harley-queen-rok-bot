@@ -319,6 +319,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
     console.error(e);
   }
 });
+// ===== Keep Railway container alive (Web Service healthcheck) =====
+const http = require("http");
+
+const PORT = process.env.PORT || 8080;
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("OK");
+  })
+  .listen(PORT, () => console.log(`🌐 HTTP server listening on ${PORT}`));
 
 client.login(TOKEN);
+
 
