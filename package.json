@@ -9,6 +9,7 @@
     "discord.js": "^14.16.0",
     "csv-parse": "^5.5.6",
     "dotenv": "^16.4.5",
-    "luxon": "^3.4.4"
+    "luxon": "^3.4.4",
+    "node-ical": "^0.15.0"
   }
 }
