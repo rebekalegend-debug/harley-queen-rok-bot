@@ -12,20 +12,54 @@ const {
   PermissionFlagsBits
 } = require("discord.js");
 
+const fs = require("fs");
+const path = require("path");
+const { parse } = require("csv-parse/sync");
+
 const { getGuild, setGuild } = require("./guildConfig");
 
 const TOKEN = process.env.TOKEN;
 const HARLEY_QUINN_USER_ID = "297057337590546434";
 
+// =====================
+// CSV CONFIG (same folder as index.js)
+// Your CSV headers (as in your screenshot): Name,ID
+// =====================
+const DATA_FILE = path.join(__dirname, "DATA.csv");
+
 // -------- helpers --------
 function sanitizeName(raw) {
-  const name = raw.trim();
+  const name = String(raw ?? "").trim();
   if (name.length < 2 || name.length > 32) return null;
   const ok = /^[\p{L}\p{N} ._\-'\[\]#]+$/u.test(name);
   return ok ? name : null;
 }
 
-// runtime memory
+function readCsvRecords() {
+  if (!fs.existsSync(DATA_FILE)) throw new Error("DATA.csv not found next to index.js");
+  const csvText = fs.readFileSync(DATA_FILE, "utf8");
+
+  // columns:true means it uses header row: Name,ID
+  return parse(csvText, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true
+  });
+}
+
+function lookupNameByGovernorId(governorId) {
+  const records = readCsvRecords();
+
+  // CSV headers: Name,ID
+  for (const row of records) {
+    const id = String(row.ID ?? "").trim();
+    const name = String(row.Name ?? "").trim();
+    if (id === String(governorId)) return name || null;
+  }
+  return null;
+}
+
+// runtime memory: userId -> screenshot done?
 const screenshotDone = new Map();
 
 const client = new Client({
@@ -129,30 +163,35 @@ client.on(Events.MessageCreate, async (message) => {
   const member = await message.guild.members.fetch(message.author.id).catch(() => null);
   if (!member) return message.delete().catch(() => {});
 
-  if (member.roles.cache.has(verifyCfg.roleId)) {
+  // If already verified, delete anything they post in verify channel
+  if (verifyCfg.roleId && member.roles.cache.has(verifyCfg.roleId)) {
     return message.delete().catch(() => {});
   }
 
+  // Allow only ONE image screenshot from the user; delete everything else
   const hasImage = message.attachments.some(att =>
     att.contentType?.startsWith("image/") ||
     /\.(png|jpg|jpeg|webp|gif)$/i.test(att.name || "")
   );
 
+  // if no image OR they already uploaded screenshot => delete
   if (!hasImage || screenshotDone.get(member.id)) {
     return message.delete().catch(() => {});
   }
 
+  // Mark screenshot uploaded
   screenshotDone.set(member.id, true);
 
+  // Show button to enter Governor ID
   const button = new ButtonBuilder()
-    .setCustomId(`verify_ingame:${member.id}`)
-    .setLabel("Enter In-Game Name")
+    .setCustomId(`verify_id:${member.id}`)
+    .setLabel("Enter Governor ID")
     .setStyle(ButtonStyle.Primary);
 
   const row = new ActionRowBuilder().addComponents(button);
 
   await message.reply({
-    content: "Great! Click below to enter your **exact in-game name**.",
+    content: "Great! Click below to enter your **Governor ID** (numbers only).",
     components: [row]
   });
 });
@@ -162,43 +201,86 @@ client.on(Events.MessageCreate, async (message) => {
 // =====================
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (!interaction.guild) return;
+
     const verifyCfg = getGuild(interaction.guild.id).verify || {};
 
+    // ---------- BUTTON ----------
     if (interaction.isButton()) {
       const [key, uid] = interaction.customId.split(":");
-      if (key !== "verify_ingame" || interaction.user.id !== uid) {
+      if (key !== "verify_id" || interaction.user.id !== uid) {
         return interaction.reply({ content: "This button isn’t for you.", ephemeral: true });
       }
 
       const modal = new ModalBuilder()
-        .setCustomId(`ingame_modal:${uid}`)
+        .setCustomId(`id_modal:${uid}`)
         .setTitle("Rise of Kingdoms Verification")
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
-              .setCustomId("ingame_name")
-              .setLabel("Your RoK in-game name")
+              .setCustomId("governor_id")
+              .setLabel("Your RoK Governor ID (numbers only)")
               .setStyle(TextInputStyle.Short)
               .setRequired(true)
-              .setMaxLength(32)
+              .setMinLength(6)
+              .setMaxLength(20)
           )
         );
 
       return interaction.showModal(modal);
     }
 
+    // ---------- MODAL SUBMIT ----------
     if (interaction.isModalSubmit()) {
       const [key, uid] = interaction.customId.split(":");
-      if (key !== "ingame_modal" || interaction.user.id !== uid) {
+      if (key !== "id_modal" || interaction.user.id !== uid) {
         return interaction.reply({ content: "This form isn’t for you.", ephemeral: true });
       }
 
-      const member = interaction.member;
-      const raw = interaction.fields.getTextInputValue("ingame_name");
-      const name = sanitizeName(raw);
+      if (!verifyCfg.roleId) {
+        return interaction.reply({
+          content: "❌ Verify role is not set. Admin must run: `!verify set role @role`",
+          ephemeral: true
+        });
+      }
 
-      if (!name) {
-        return interaction.reply({ content: "❌ Invalid name format.", ephemeral: true });
+      const member = interaction.member;
+
+      const rawId = interaction.fields.getTextInputValue("governor_id").trim();
+
+      // Numbers only
+      if (!/^\d+$/.test(rawId)) {
+        return interaction.reply({
+          content: "❌ Governor ID must contain numbers only.",
+          ephemeral: true
+        });
+      }
+
+      // Lookup name in DATA.csv
+      let nameFromDb = null;
+      try {
+        nameFromDb = lookupNameByGovernorId(rawId);
+      } catch (err) {
+        console.error("CSV error:", err);
+        return interaction.reply({
+          content: "❌ Database error reading DATA.csv. Ask an admin.",
+          ephemeral: true
+        });
+      }
+
+      if (!nameFromDb) {
+        return interaction.reply({
+          content: "❌ ID not found in database.",
+          ephemeral: true
+        });
+      }
+
+      const cleanName = sanitizeName(nameFromDb);
+      if (!cleanName) {
+        return interaction.reply({
+          content: "❌ Name in database is not valid for Discord nickname.",
+          ephemeral: true
+        });
       }
 
       const me = await interaction.guild.members.fetchMe();
@@ -206,21 +288,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
         !me.permissions.has(PermissionFlagsBits.ManageNicknames) ||
         !me.permissions.has(PermissionFlagsBits.ManageRoles)
       ) {
-        return interaction.reply({ content: "❌ Missing permissions.", ephemeral: true });
+        return interaction.reply({ content: "❌ Bot missing permissions.", ephemeral: true });
       }
 
-      await member.setNickname(name);
+      await member.setNickname(cleanName);
       await member.roles.add(verifyCfg.roleId);
 
+      // Remove button message (best-effort)
       if (interaction.message) {
         await interaction.message.edit({
           content: `✅ All set, ${interaction.user}! Enjoy the server.`,
           components: []
-        });
+        }).catch(() => {});
       }
 
       return interaction.reply({
-        content: `✅ All set, ${interaction.user}! Enjoy the server.`,
+        content: `✅ Verified as **${cleanName}** (ID: ${rawId}). Role granted.`,
         ephemeral: true
       });
     }
@@ -230,3 +313,4 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.login(TOKEN);
+
