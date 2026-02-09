@@ -2,7 +2,8 @@
 const fs = require("fs");
 const path = require("path");
 
-const FILE = path.join(__dirname, "guilds.json");
+const FILE = path.join(process.env.DATA_DIR || __dirname, "guilds.json");
+
 
 function load() {
   try {
