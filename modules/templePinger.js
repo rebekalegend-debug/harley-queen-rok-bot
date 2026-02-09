@@ -1,4 +1,4 @@
-/// modules/templePinger.js
+// modules/templePinger.js
 import { loadConfig, saveConfig } from "./storage.js";
 
 const PREFIX = "$";
@@ -10,10 +10,6 @@ let schedulerStarted = false;
 
 function fmtUTC(d) {
   return d.toUTCString();
-}
-
-function isAdmin(member) {
-  return member.permissions.has("ManageGuild");
 }
 
 function parseDateTimeWithTZ(dateStr, timeStr, tzStr) {
@@ -33,7 +29,6 @@ function parseDateTimeWithTZ(dateStr, timeStr, tzStr) {
     offsetMinutes = sign * (oh * 60 + om);
   }
 
-  // local time at tz -> UTC
   const utcMs = Date.UTC(Y, M - 1, D, h, m) - offsetMinutes * 60 * 1000;
   const dObj = new Date(utcMs);
   if (Number.isNaN(dObj.getTime())) return null;
@@ -142,6 +137,7 @@ function statusText() {
   lines.push("**Lost Temple Status**");
   lines.push(`• Channel: <#${cfg.targetChannelId}>`);
   lines.push(`• Role: <@&${cfg.pingRoleId}>`);
+  lines.push(`• Allowed Role: ${cfg.allowedRoleId ? `<@&${cfg.allowedRoleId}>` : "**not set**"}`);
   lines.push(`• Cycle Days: **${cfg.cycleDays}**`);
   lines.push(`• Ping Before: **${cfg.pingHoursBefore}h**`);
   lines.push(`• Unshielded Duration: **${cfg.unshieldedHours}h**`);
@@ -158,73 +154,90 @@ function statusText() {
   return lines.join("\n");
 }
 
+// -------- Permission model (RESTRICTED ONLY) --------
+async function isGuildOwner(msg) {
+  if (!msg.guild) return false;
+  const ownerId = msg.guild.ownerId || (await msg.guild.fetchOwner().then(o => o.id).catch(() => null));
+  return ownerId && msg.author.id === ownerId;
+}
+
+async function canUseTemple(msg) {
+  // server owner always allowed
+  if (await isGuildOwner(msg)) return true;
+
+  // allowed role
+  if (cfg?.allowedRoleId && msg.member?.roles?.cache?.has(cfg.allowedRoleId)) return true;
+
+  return false;
+}
+
 export function setupTemplePinger(client) {
-  // load config once on boot
   cfg = loadConfig();
   ensureFutureDrop();
 
   console.log("[TEMPLE] module registered");
 
-  // commands
   client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
+    if (!msg.guild) return;
     if (!msg.content.startsWith(PREFIX)) return;
 
     const args = msg.content.slice(PREFIX.length).trim().split(/\s+/);
     const cmd = (args.shift() ?? "").toLowerCase();
 
-        // =====================
-    // TEMPLE CONFIG COMMANDS
-    // =====================
+    // =========================
+    // OWNER-ONLY: set/remove allowed role
+    // =========================
     if (cmd === "temple") {
-      if (!msg.member || !isAdmin(msg.member)) {
-        return msg.reply("❌ You need **Manage Server** permission to configure temple settings.");
+      if (!(await isGuildOwner(msg))) {
+        return msg.reply("❌ Only the **Server Owner** can change Temple permissions.");
       }
 
       const sub = (args.shift() ?? "").toLowerCase();
 
-      if (sub === "set") {
-        const type = (args.shift() ?? "").toLowerCase();
+      // $temple access @Role
+      if (sub === "access") {
+        const role = msg.mentions.roles.first();
+        if (!role) return msg.reply("Usage: `$temple access @Role` or `$temple access clear`");
 
-        // $temple set channel #channel
-        if (type === "channel") {
-          const ch = msg.mentions.channels.first();
-          if (!ch) return msg.reply("Usage: `$temple set channel #channel`");
-
-          cfg.targetChannelId = ch.id;
-          saveConfig(cfg);
-
-          return msg.reply(`✅ Temple channel set to ${ch}`);
-        }
-
-        // $temple set role @role
-        if (type === "role") {
-          const role = msg.mentions.roles.first();
-          if (!role) return msg.reply("Usage: `$temple set role @role`");
-
-          cfg.pingRoleId = role.id;
-          saveConfig(cfg);
-
-          return msg.reply(`✅ Temple ping role set to **${role.name}**`);
-        }
-
-        return msg.reply("Usage: `$temple set channel #channel` or `$temple set role @role`");
+        cfg.allowedRoleId = role.id;
+        saveConfig(cfg);
+        return msg.reply(`✅ Temple access role set to **${role.name}**`);
       }
 
-      // $temple show
+      // $temple access clear
+      if (sub === "access" && (args[0] ?? "").toLowerCase() === "clear") {
+        cfg.allowedRoleId = null;
+        saveConfig(cfg);
+        return msg.reply("✅ Temple access role cleared. Only Server Owner can use Temple commands now.");
+      }
+
+      // allow: $temple show (owner can always see)
       if (sub === "show" || sub === "status") {
         return msg.reply({ content: statusText(), allowedMentions: { roles: [] } });
       }
 
       return msg.reply(
-        "**Temple Setup Commands**\n" +
-        "`$temple set channel #channel`\n" +
-        "`$temple set role @role`\n" +
-        "`$temple show`"
+        "**Temple Owner Commands**\n" +
+        "`$temple access @Role` — allow that role to use temple commands\n" +
+        "`$temple access clear` — remove allowed role\n" +
+        "`$temple show` — show temple config/status"
       );
     }
 
-    
+    // =========================
+    // RESTRICT all temple commands
+    // =========================
+    const templeCmds = ["help", "status", "info", "stat", "setdrop", "cycle", "pinghours", "pingtest"];
+    if (templeCmds.includes(cmd)) {
+      const ok = await canUseTemple(msg);
+      if (!ok) {
+        const req = cfg?.allowedRoleId ? `<@&${cfg.allowedRoleId}>` : "**Server Owner**";
+        return msg.reply(`❌ No permission. Required: ${req}`);
+      }
+    }
+
+    // ----- existing commands -----
     if (cmd === "help") {
       return msg.reply({
         content:
@@ -232,10 +245,12 @@ export function setupTemplePinger(client) {
           `• \`${PREFIX}help\`\n` +
           `• \`${PREFIX}status\`\n` +
           `• \`${PREFIX}setdrop YYYY-MM-DD HH:MM TZ\`\n` +
-          `   Example: \`${PREFIX}setdrop 2026-02-13 18:31 +02:00\`\n` +
           `• \`${PREFIX}cycle <days>\`\n` +
           `• \`${PREFIX}pinghours <hours>\`\n` +
-          `• \`${PREFIX}pingtest\``,
+          `• \`${PREFIX}pingtest\`\n\n` +
+          `**Owner Permissions**\n` +
+          `• \`${PREFIX}temple access @Role\`\n` +
+          `• \`${PREFIX}temple access clear\``,
         allowedMentions: { repliedUser: false }
       });
     }
@@ -278,7 +293,6 @@ export function setupTemplePinger(client) {
       const hours = Number(args[0]);
       if (!Number.isFinite(hours) || hours < 1 || hours > 168) {
         return msg.reply(`Usage: \`${PREFIX}pinghours 24\` (1–168)`);
-
       }
       cfg.pingHoursBefore = hours;
       saveConfig(cfg);
@@ -310,7 +324,6 @@ export function setupTemplePinger(client) {
     return msg.reply(`Unknown command. Use \`${PREFIX}help\``);
   });
 
-  // scheduler (start once)
   client.once("ready", () => {
     if (schedulerStarted) return;
     schedulerStarted = true;
@@ -320,7 +333,7 @@ export function setupTemplePinger(client) {
 
     console.log("[TEMPLE] scheduler started");
     console.log(
-      `[TEMPLE] channel=${cfg.targetChannelId} role=${cfg.pingRoleId} cycleDays=${cfg.cycleDays} pingHoursBefore=${cfg.pingHoursBefore}`
+      `[TEMPLE] channel=${cfg.targetChannelId} role=${cfg.pingRoleId} allowedRole=${cfg.allowedRoleId ?? "none"} cycleDays=${cfg.cycleDays} pingHoursBefore=${cfg.pingHoursBefore}`
     );
 
     setInterval(() => {
