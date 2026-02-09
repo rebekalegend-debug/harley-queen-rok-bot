@@ -6,6 +6,8 @@ const PREFIX = "!";
 const TZ = "UTC";
 const CHECK_EVERY_MS = 30_000;
 
+/* ================= UTILS ================= */
+
 function parseLine(line) {
   // Tue, 10.2.  20:00
   const m = line
@@ -28,13 +30,25 @@ function parseLine(line) {
 }
 
 function fmt(iso) {
-  return DateTime.fromISO(iso).toUTC().toFormat("ccc dd.LL HH:mm 'UTC'");
+  return DateTime.fromISO(iso, { zone: TZ })
+    .toUTC()
+    .toFormat("ccc dd.LL HH:mm 'UTC'");
 }
+
+function nextUpcoming(list) {
+  const now = DateTime.now().setZone(TZ);
+  return list
+    .map(d => DateTime.fromISO(d, { zone: TZ }))
+    .filter(d => d > now)
+    .sort((a, b) => a - b)[0] || null;
+}
+
+/* ================= MODULE ================= */
 
 export function setupRuinsPinger(client) {
   console.log("[RUINS] module registered");
 
-  // ================= COMMANDS =================
+  /* ============ COMMANDS ============ */
   client.on("messageCreate", async (msg) => {
     if (!msg.guild || msg.author.bot) return;
     if (!msg.content.startsWith(PREFIX)) return;
@@ -43,37 +57,36 @@ export function setupRuinsPinger(client) {
     const guildId = msg.guild.id;
     const cfg = loadRuins(guildId);
 
-    const [cmd, sub, ...rest] = msg.content
-      .slice(1)
-      .split(/\s+/);
+    const [cmd, sub, ...rest] = msg.content.slice(1).trim().split(/\s+/);
 
-
+    /* ---------- HELP ---------- */
     if (cmd === "ruins" && sub === "help") {
-  return msg.reply(
-    "**🗿 Ruins / Altar Commands**\n\n" +
-    "**Setup (Admin)**\n" +
-    "`!ruins set channel #channel`\n" +
-    "`!ruins set role @role`\n\n" +
-    "**Add Dates**\n" +
-    "`!ruins add` *(paste dates on new lines)*\n" +
-    "`!altar add` *(paste dates on new lines)*\n\n" +
-    "**View**\n" +
-    "`!ruins list`\n" +
-    "`!altar list`\n" +
-    "`!ruins upcoming`\n" +
-    "`!ruins all`\n\n" +
-    "**Maintenance**\n" +
-    "`!ruins test`\n" +
-    "`!ruins clear`\n" +
-    "`!altar clear`\n" +
-    "`!ruins clear notified`"
-  );
-}
-    // ---------- SETUP ----------
-    if (cmd === "ruins") {
+      return msg.reply(
+        "**🗿 Ruins / 🛕 Altar Commands**\n\n" +
+        "**Setup (Admin)**\n" +
+        "`!ruins set channel #channel`\n" +
+        "`!ruins set role @role`\n\n" +
+        "**Add Dates**\n" +
+        "`!ruins add` *(paste dates on new lines)*\n" +
+        "`!altar add` *(paste dates on new lines)*\n\n" +
+        "**View**\n" +
+        "`!ruins list`\n" +
+        "`!altar list`\n" +
+        "`!ruins upcoming`\n" +
+        "`!altar upcoming`\n\n" +
+        "**Test / Maintenance**\n" +
+        "`!ruins test`\n" +
+        "`!altar test`\n" +
+        "`!ruins clear`\n" +
+        "`!altar clear`"
+      );
+    }
+
+    /* ---------- SETUP ---------- */
+    if (cmd === "ruins" && sub === "set") {
       if (!isAdmin) return msg.reply("❌ Admin only.");
 
-      if (sub === "set" && rest[0] === "channel") {
+      if (rest[0] === "channel") {
         const ch = msg.mentions.channels.first();
         if (!ch) return msg.reply("Usage: `!ruins set channel #channel`");
         cfg.channelId = ch.id;
@@ -81,24 +94,16 @@ export function setupRuinsPinger(client) {
         return msg.reply(`✅ Ruins channel set to ${ch}`);
       }
 
-      if (sub === "set" && rest[0] === "role") {
+      if (rest[0] === "role") {
         const role = msg.mentions.roles.first();
         if (!role) return msg.reply("Usage: `!ruins set role @role`");
         cfg.pingRoleId = role.id;
         saveRuins(guildId, cfg);
         return msg.reply(`✅ Ruins ping role set to **${role.name}**`);
       }
-
-      if (sub === "show") {
-        return msg.reply(
-          cfg.channelId
-            ? `📍 Channel: <#${cfg.channelId}>\n🔔 Role: <@&${cfg.pingRoleId}>`
-            : "❌ Ruins pinger not configured yet."
-        );
-      }
     }
 
-    // ---------- ADD DATES ----------
+    /* ---------- ADD ---------- */
     if ((cmd === "ruins" || cmd === "altar") && sub === "add") {
       if (!isAdmin) return msg.reply("❌ Admin only.");
 
@@ -106,12 +111,11 @@ export function setupRuinsPinger(client) {
       if (!lines.length) return msg.reply("Paste dates on new lines.");
 
       let added = 0;
+      const list = cmd === "ruins" ? cfg.ruins : cfg.altar;
+
       for (const line of lines) {
         const iso = parseLine(line);
-        if (!iso) continue;
-
-        const list = cmd === "ruins" ? cfg.ruins : cfg.altar;
-        if (!list.includes(iso)) {
+        if (iso && !list.includes(iso)) {
           list.push(iso);
           added++;
         }
@@ -121,7 +125,7 @@ export function setupRuinsPinger(client) {
       return msg.reply(`✅ Added **${added}** ${cmd} dates.`);
     }
 
-    // ---------- SHOW ----------
+    /* ---------- LIST ---------- */
     if ((cmd === "ruins" || cmd === "altar") && sub === "list") {
       const list = cmd === "ruins" ? cfg.ruins : cfg.altar;
       if (!list.length) return msg.reply("No dates set.");
@@ -134,23 +138,55 @@ export function setupRuinsPinger(client) {
       );
     }
 
-    // ---------- CLEAR ----------
+    /* ---------- UPCOMING ---------- */
+    if ((cmd === "ruins" || cmd === "altar") && sub === "upcoming") {
+      const list = cmd === "ruins" ? cfg.ruins : cfg.altar;
+      const next = nextUpcoming(list);
+      if (!next) return msg.reply("No upcoming events.");
+
+      return msg.reply(`⏰ **Next ${cmd.toUpperCase()}** — ${fmt(next.toISO())}`);
+    }
+
+    /* ---------- TEST ---------- */
+    if ((cmd === "ruins" || cmd === "altar") && sub === "test") {
+      if (!isAdmin) return msg.reply("❌ Admin only.");
+
+      if (!cfg.channelId || !cfg.pingRoleId) {
+        return msg.reply("❌ Channel or role not configured.");
+      }
+
+      const list = cmd === "ruins" ? cfg.ruins : cfg.altar;
+      const next = nextUpcoming(list);
+      if (!next) return msg.reply("No upcoming events to test.");
+
+      const ch = await client.channels.fetch(cfg.channelId).catch(() => null);
+      if (!ch?.isTextBased()) return msg.reply("Channel not found.");
+
+      await ch.send(
+        `<@&${cfg.pingRoleId}> **${cmd.toUpperCase()}** in **1 hour** — send march! *(TEST)*`
+      );
+
+      return msg.reply("✅ Test ping sent.");
+    }
+
+    /* ---------- CLEAR ---------- */
     if ((cmd === "ruins" || cmd === "altar") && sub === "clear") {
       if (!isAdmin) return msg.reply("❌ Admin only.");
 
       if (cmd === "ruins") cfg.ruins = [];
       else cfg.altar = [];
 
+      cfg.notified = {};
       saveRuins(guildId, cfg);
       return msg.reply(`🧹 Cleared all ${cmd} dates.`);
     }
   });
 
-  // ================= SCHEDULER =================
+  /* ============ SCHEDULER ============ */
   client.once("ready", () => {
     setInterval(async () => {
-      for (const guildId of client.guilds.cache.keys()) {
-        const cfg = loadRuins(guildId);
+      for (const guild of client.guilds.cache.values()) {
+        const cfg = loadRuins(guild.id);
         if (!cfg.channelId || !cfg.pingRoleId) continue;
 
         const now = DateTime.now().setZone(TZ);
@@ -171,7 +207,7 @@ export function setupRuinsPinger(client) {
               );
 
               cfg.notified[iso] = true;
-              saveRuins(guildId, cfg);
+              saveRuins(guild.id, cfg);
             }
           }
         }
