@@ -24,14 +24,17 @@ function load() {
 
 function save(data) {
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2), "utf8");
-  console.log("💾 Saved guilds.json:", FILE);
+  // you can keep or remove this log
+  // console.log("💾 Saved guilds.json:", FILE);
 }
 
 function deepMerge(a, b) {
   if (typeof a !== "object" || !a) return b;
   if (typeof b !== "object" || !b) return b;
   const out = { ...a };
-  for (const k of Object.keys(b)) out[k] = deepMerge(a[k], b[k]);
+  for (const k of Object.keys(b)) {
+    out[k] = deepMerge(a[k], b[k]);
+  }
   return out;
 }
 
@@ -40,4 +43,11 @@ function getGuild(guildId) {
   return db[guildId] ?? {};
 }
 
-function
+function setGuild(guildId, patch) {
+  const db = load();
+  db[guildId] = deepMerge(db[guildId] ?? {}, patch);
+  save(db);
+  return db[guildId];
+}
+
+module.exports = { getGuild, setGuild };
