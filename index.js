@@ -6,6 +6,7 @@ import { Client, GatewayIntentBits, Partials } from "discord.js";
 import { setupVerify } from "./modules/verify.js";
 import { setupTemplePinger } from "./modules/templePinger.js";
 import { setupRuinsPinger } from "./modules/ruinsPinger.js";
+import { getGuild, setGuild, getGuildAoo } from "./modules/guildConfig.js";
 
 // create ONE client
 const client = new Client({
