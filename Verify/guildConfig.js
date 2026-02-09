@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const FILE = path.join(process.cwd(), "guilds.json");
+const FILE = path.join(harley-queen-rok-bot/Verify.json, "guilds.json");
 
 function load() {
   try {
