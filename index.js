@@ -1,5 +1,12 @@
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+// index.js (ROOT)
+import "dotenv/config";
+import { Client, GatewayIntentBits, Partials } from "discord.js";
 
+// import modules
+import { setupVerify } from "./modules/verify.js";
+import { setupTemplePinger } from "./modules/templePinger.js";
+
+// create ONE client
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -10,13 +17,9 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// Load modules (each module attaches events/timers to the SAME client)
-require("./modules/verify")(client);
-require("./modules/templePinger")(client);
-// later: require("./modules/anotherBotFeature")(client);
+// attach modules
+setupVerify(client);
+setupTemplePinger(client);
 
-client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-});
-
-client.login(process.env.BOT_TOKEN);
+// login ONCE
+client.login(process.env.DISCORD_TOKEN);
