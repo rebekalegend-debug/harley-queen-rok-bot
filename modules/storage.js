@@ -7,7 +7,7 @@ const CONFIG_PATH = path.join(process.cwd(), "templeConfig.json");
 const DEFAULTS = {
   targetChannelId: process.env.TEMPLE_CHANNEL_ID ?? null,
   pingRoleId: process.env.TEMPLE_PING_ROLE_ID ?? null,
-
+  allowedRoleId: null,
   // scheduling behavior
   cycleDays: Number(process.env.TEMPLE_CYCLE_DAYS ?? "7"),
   pingHoursBefore: Number(process.env.TEMPLE_PING_HOURS_BEFORE ?? "24"),
