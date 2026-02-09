@@ -39,9 +39,17 @@ function getGuild(guildId) {
 
 /* ================= HELPERS ================= */
 
-const isOwner = (m) => m.guild.ownerId === m.author.id;
-const hasAccess = (m, g) =>
-  isOwner(m) || (g.aooAccessRole && m.roles.cache.has(g.aooAccessRole));
+function isOwner(msg) {
+  if (!msg?.guild || !msg?.member) return false;
+  return msg.guild.ownerId === msg.member.id;
+}
+
+function hasAccess(member, g) {
+  if (!member) return false;
+  if (member.id === member.guild.ownerId) return true;
+  return g.aooAccessRole && member.roles.cache.has(g.aooAccessRole);
+}
+
 
 const formatUTC = d =>
   d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
