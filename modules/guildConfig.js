@@ -53,3 +53,13 @@ export function setGuild(guildId, patch) {
   save(db);
   return db[guildId];
 }
+export function getGuildAoo(guildId) {
+  const g = getGuild(guildId);
+  return {
+    accessRoleId: g.aoo?.accessRoleId ?? null,
+    channelId: g.aoo?.channelId ?? null,
+    pingRoleId: g.aoo?.pingRoleId ?? null,
+    startAtUtc: g.aoo?.startAtUtc ?? null
+  };
+}
+
