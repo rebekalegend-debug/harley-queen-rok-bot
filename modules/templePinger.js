@@ -173,6 +173,58 @@ export function setupTemplePinger(client) {
     const args = msg.content.slice(PREFIX.length).trim().split(/\s+/);
     const cmd = (args.shift() ?? "").toLowerCase();
 
+        // =====================
+    // TEMPLE CONFIG COMMANDS
+    // =====================
+    if (cmd === "temple") {
+      if (!msg.member || !isAdmin(msg.member)) {
+        return msg.reply("❌ You need **Manage Server** permission to configure temple settings.");
+      }
+
+      const sub = (args.shift() ?? "").toLowerCase();
+
+      if (sub === "set") {
+        const type = (args.shift() ?? "").toLowerCase();
+
+        // $temple set channel #channel
+        if (type === "channel") {
+          const ch = msg.mentions.channels.first();
+          if (!ch) return msg.reply("Usage: `$temple set channel #channel`");
+
+          cfg.targetChannelId = ch.id;
+          saveConfig(cfg);
+
+          return msg.reply(`✅ Temple channel set to ${ch}`);
+        }
+
+        // $temple set role @role
+        if (type === "role") {
+          const role = msg.mentions.roles.first();
+          if (!role) return msg.reply("Usage: `$temple set role @role`");
+
+          cfg.pingRoleId = role.id;
+          saveConfig(cfg);
+
+          return msg.reply(`✅ Temple ping role set to **${role.name}**`);
+        }
+
+        return msg.reply("Usage: `$temple set channel #channel` or `$temple set role @role`");
+      }
+
+      // $temple show
+      if (sub === "show" || sub === "status") {
+        return msg.reply({ content: statusText(), allowedMentions: { roles: [] } });
+      }
+
+      return msg.reply(
+        "**Temple Setup Commands**\n" +
+        "`$temple set channel #channel`\n" +
+        "`$temple set role @role`\n" +
+        "`$temple show`"
+      );
+    }
+
+    
     if (cmd === "help") {
       return msg.reply({
         content:
