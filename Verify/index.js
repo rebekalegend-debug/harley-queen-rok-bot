@@ -16,7 +16,7 @@ const fs = require("fs");
 const path = require("path");
 const { parse } = require("csv-parse/sync");
 
-const { getGuild, setGuild } = require("./Verify/guildConfig");
+const { getGuild, setGuild } = require("./guildConfig");
 
 const TOKEN = process.env.TOKEN;
 const HARLEY_QUINN_USER_ID = "297057337590546434";
@@ -313,5 +313,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.login(TOKEN);
+
 
 
