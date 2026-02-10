@@ -785,7 +785,9 @@ client.on("messageCreate", async (msg) => {
     } catch {}
   }
 });
-export async function initAooMgeModule(client) {
-  // nothing else needed — listeners are already attached
+export function setupAooMgeEvent(client) {
+  // module is initialized just by being imported
 }
+
+
 
