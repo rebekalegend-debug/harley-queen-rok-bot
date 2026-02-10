@@ -16,30 +16,27 @@ const PING = process.env.PING_TEXT ?? "@everyone";
 const CHECK_EVERY_MINUTES = Number(process.env.CHECK_EVERY_MINUTES ?? "10");
 const PREFIX = process.env.PREFIX ?? "!";
 
-// persistent state
 const STATE_DIR = process.env.STATE_DIR ?? "/data";
-const stateFile = path.resolve(STATE_DIR, "aoomge_state.json");
+const STATE_FILE = path.join(STATE_DIR, "aoomge_state.json");
 
 /* ================= STATE ================= */
 
-ensureStateDir();
+ensureDir();
 const state = loadState();
 state.scheduled ??= [];
 
-function ensureStateDir() {
+function ensureDir() {
   fs.mkdirSync(STATE_DIR, { recursive: true });
 }
-
 function loadState() {
   try {
-    return JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
   } catch {
     return {};
   }
 }
-
 function saveState() {
-  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 }
 
 /* ================= HELPERS ================= */
@@ -63,15 +60,12 @@ function getEventType(evOrText = "") {
 function isoDateUTC(d) {
   return d.toISOString().slice(0, 10);
 }
-
 function formatUTC(d) {
   return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
 }
-
 function addHours(d, h) {
   return new Date(d.getTime() + h * 3600000);
 }
-
 function addMonthsUTC(d, m) {
   const x = new Date(d);
   x.setUTCMonth(x.getUTCMonth() + m);
@@ -87,7 +81,23 @@ function makeKey(prefix, ev, suffix) {
   return `${prefix}_${ev.uid}_${isoDateUTC(new Date(ev.start))}_${suffix}`;
 }
 
-/* ================= SCHEDULER ================= */
+/* ================= ANNOUNCEMENT TEXT ================= */
+
+const aooOpenMsg = () =>
+  "AOO registration is opened, reach out to leadership for registration!";
+const aooWarnMsg = () =>
+  "AOO registration will close soon, be sure you are registered!";
+const aooClosedMsg = () =>
+  "AOO registration closed";
+
+const mgeOpenMsg = () =>
+  "MGE registration is open, check the MGE channel and apply!";
+const mgeWarnMsg = () =>
+  "MGE registration closes in 24 hours, don’t forget to apply!";
+const mgeClosedMsg = () =>
+  "MGE registration is closed";
+
+/* ================= SCHEDULED PINGS ================= */
 
 function schedulePing({ channelId, runAtMs, message }) {
   state.scheduled.push({
@@ -102,6 +112,7 @@ function schedulePing({ channelId, runAtMs, message }) {
 
 async function processScheduled(client) {
   const now = Date.now();
+  let changed = false;
 
   for (const s of state.scheduled) {
     if (s.sent || now < s.runAtMs) continue;
@@ -110,10 +121,87 @@ async function processScheduled(client) {
     if (ch?.isTextBased()) await ch.send(s.message);
 
     s.sent = true;
+    changed = true;
   }
 
-  state.scheduled = state.scheduled.filter(x => !x.sent);
-  saveState();
+  if (changed) {
+    state.scheduled = state.scheduled.filter(x => !x.sent);
+    saveState();
+  }
+}
+
+/* ================= ANNOUNCEMENT LOGIC (AOO + MGE) ================= */
+
+async function runCheck(client) {
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
+  if (!channel?.isTextBased()) return;
+
+  const now = new Date();
+  const events = await fetchEvents();
+
+  for (const ev of events) {
+    const type = getEventType(ev);
+    if (!type) continue;
+
+    const start = new Date(ev.start);
+    const end = new Date(ev.end);
+
+    /* ===== AOO REGISTRATION ===== */
+    if (type === "ark_registration") {
+      const openKey = makeKey("AOO", ev, "open");
+      const warnKey = makeKey("AOO", ev, "warn");
+      const closeKey = makeKey("AOO", ev, "close");
+
+      const warnTime = addHours(end, -6);
+
+      if (!state[openKey] && now >= start) {
+        await channel.send(`${PING}\n${aooOpenMsg()}`);
+        state[openKey] = true;
+        saveState();
+      }
+
+      if (!state[warnKey] && now >= warnTime && now < end) {
+        await channel.send(`${PING}\n${aooWarnMsg()}`);
+        state[warnKey] = true;
+        saveState();
+      }
+
+      if (!state[closeKey] && now >= end) {
+        await channel.send(`${PING}\n${aooClosedMsg()}`);
+        state[closeKey] = true;
+        saveState();
+      }
+    }
+
+    /* ===== MGE ===== */
+    if (type === "mge") {
+      const openKey = makeKey("MGE", ev, "open");
+      const warnKey = makeKey("MGE", ev, "warn");
+      const closeKey = makeKey("MGE", ev, "close");
+
+      const openTime = addHours(end, 24);
+      const warnTime = addHours(start, -48);
+      const closeTime = addHours(start, -24);
+
+      if (!state[openKey] && now >= openTime) {
+        await channel.send(`${PING}\n${mgeOpenMsg()}`);
+        state[openKey] = true;
+        saveState();
+      }
+
+      if (!state[warnKey] && now >= warnTime && now < closeTime) {
+        await channel.send(`${PING}\n${mgeWarnMsg()}`);
+        state[warnKey] = true;
+        saveState();
+      }
+
+      if (!state[closeKey] && now >= closeTime && now < start) {
+        await channel.send(`${PING}\n${mgeClosedMsg()}`);
+        state[closeKey] = true;
+        saveState();
+      }
+    }
+  }
 }
 
 /* ================= AOO DROPDOWN ================= */
@@ -141,84 +229,18 @@ function listUtcDates(start, end) {
   return out;
 }
 
-function dateSelect(startMs, endMs, dates) {
-  return new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId(`aoo_date|${startMs}|${endMs}`)
-      .setPlaceholder("Select date (UTC)")
-      .addOptions(dates.slice(0, 25).map(d => ({
-        label: isoDateUTC(d),
-        value: isoDateUTC(d),
-      })))
-  );
-}
-
-function hourSelect(startMs, endMs, dateISO) {
-  const [y, m, d] = dateISO.split("-").map(Number);
-  const opts = [];
-
-  for (let h = 0; h < 24; h++) {
-    const t = Date.UTC(y, m - 1, d, h);
-    if (t >= startMs && t < endMs) {
-      opts.push({ label: `${String(h).padStart(2, "0")}:00 UTC`, value: String(h) });
-    }
-  }
-
-  return new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId(`aoo_hour|${startMs}|${endMs}|${dateISO}`)
-      .setPlaceholder("Select hour (UTC)")
-      .addOptions(opts.length ? opts : [{ label: "No valid hours", value: "none" }])
-  );
-}
-
 /* ================= MODULE EXPORT ================= */
 
 export function setupAooMge(client) {
   client.once("ready", async () => {
-    setInterval(() => processScheduled(client), 30_000);
-  });
+    await runCheck(client);
+    await processScheduled(client);
 
-  client.on("interactionCreate", async i => {
-    if (!i.isStringSelectMenu()) return;
-    if (!isAdmin(i.member)) {
-      return i.reply({ content: "❌ Admin only.", ephemeral: true });
-    }
+    setInterval(() => runCheck(client).catch(console.error),
+      CHECK_EVERY_MINUTES * 60 * 1000
+    );
 
-    const id = i.customId;
-
-    if (id.startsWith("aoo_date|")) {
-      const [, s, e] = id.split("|");
-      const dateISO = i.values[0];
-      return i.update({
-        content: `Selected **${dateISO}** – now choose hour`,
-        components: [hourSelect(+s, +e, dateISO)],
-      });
-    }
-
-    if (id.startsWith("aoo_hour|")) {
-      const [, s, e, dateISO] = id.split("|");
-      const hour = Number(i.values[0]);
-      const [y, m, d] = dateISO.split("-").map(Number);
-      const startMs = Date.UTC(y, m - 1, d, hour);
-
-      schedulePing({
-        channelId: i.channelId,
-        runAtMs: startMs - 30 * 60_000,
-        message: `${PING}\nAOO starts in **30 minutes**`,
-      });
-
-      schedulePing({
-        channelId: i.channelId,
-        runAtMs: startMs - 10 * 60_000,
-        message: `${PING}\nAOO starts in **10 minutes**`,
-      });
-
-      return i.update({
-        content: `✅ AOO reminders scheduled for **${formatUTC(new Date(startMs))}**`,
-        components: [],
-      });
-    }
+    setInterval(() => processScheduled(client).catch(console.error), 30_000);
   });
 
   client.on("messageCreate", async msg => {
@@ -231,9 +253,19 @@ export function setupAooMge(client) {
       if (!aoo) return msg.reply("No upcoming AOO found.");
 
       const dates = listUtcDates(aoo.start, aoo.end);
-      return msg.reply({
-        content: `AOO window: **${formatUTC(aoo.start)} → ${formatUTC(aoo.end)}**`,
-        components: [dateSelect(aoo.start.getTime(), aoo.end.getTime(), dates)],
+      const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`aoo_date|${aoo.start.getTime()}|${aoo.end.getTime()}`)
+          .setPlaceholder("Select AOO date (UTC)")
+          .addOptions(dates.slice(0, 25).map(d => ({
+            label: isoDateUTC(d),
+            value: isoDateUTC(d),
+          })))
+      );
+
+      await msg.reply({
+        content: `AOO window:\n${formatUTC(aoo.start)} → ${formatUTC(aoo.end)}`,
+        components: [row],
       });
     }
   });
