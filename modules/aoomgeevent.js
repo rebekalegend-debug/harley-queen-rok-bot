@@ -39,11 +39,16 @@ function getGuild(guildId) {
 
 /* ================= HELPERS ================= */
 
+function alreadyScheduled(g, time, text) {
+  return g.scheduled.some(
+    s => s.time === time && s.text === text
+  );
+}
+
+  
 function clearAooSchedules(g) {
   g.scheduled = g.scheduled.filter(
-    s =>
-      !s.text.includes("AOO starts in **30 minutes**") &&
-      !s.text.includes("AOO starts in **10 minutes**")
+    s => !s.text.includes("AOO starts in")
   );
 }
   
@@ -76,7 +81,74 @@ function getType(ev) {
 }
 
 /* ================= SCHEDULER ================= */
+async function scheduleCalendarAnnouncements(guildId) {
+  const db = loadDB();
+  const g = db[guildId];
+  if (!g?.pingChannel) return;
 
+  const events = await fetchEvents();
+  const now = Date.now();
+
+  for (const e of events) {
+    const type = getType(e);
+    if (!type) continue;
+
+    let start = new Date(e.start);
+    let end = new Date(e.end);
+
+    // FIX all-day events
+    if (e.datetype === "date") {
+      end.setUTCDate(end.getUTCDate() - 1);
+      end.setUTCHours(23, 59, 59, 999);
+    }
+
+    /* ===== AOO REGISTRATION ===== */
+    if (type === "ark_registration") {
+      const open = start.getTime();
+      const warn = end.getTime() - 6 * 3600000;
+      const close = end.getTime();
+
+      const aooRole = g.aooRole ? `<@&${g.aooRole}>` : "";
+
+      const items = [
+        [open, `🏆 ${aooRole}\nAOO registration is opened!`],
+        [warn, `⚠️ ${aooRole}\nAOO registration will close soon!`],
+        [close, `❌ ${aooRole}\nAOO registration closed`],
+      ];
+
+      for (const [t, msg] of items) {
+        if (t > now && !alreadyScheduled(g, t, msg)) {
+          g.scheduled.push({ time: t, channelId: g.pingChannel, text: msg, sent: false });
+        }
+      }
+    }
+
+    /* ===== MGE ===== */
+    if (type === "mge") {
+      const open = end.getTime() + 24 * 3600000;
+      const warn = start.getTime() - 48 * 3600000;
+      const close = start.getTime() - 24 * 3600000;
+
+      const mgeRole = g.mgeRole ? `<@&${g.mgeRole}>` : "";
+
+      const items = [
+        [open, `📢 ${mgeRole}\nMGE registration is open!`],
+        [warn, `⚠️ ${mgeRole}\nMGE registration closes in 24h!`],
+        [close, `❌ ${mgeRole}\nMGE registration closed`],
+      ];
+
+      for (const [t, msg] of items) {
+        if (t > now && !alreadyScheduled(g, t, msg)) {
+          g.scheduled.push({ time: t, channelId: g.pingChannel, text: msg, sent: false });
+        }
+      }
+    }
+  }
+
+  saveDB(db);
+}
+
+  
 function schedule(g, time, channelId, text) {
   g.scheduled.push({ time, channelId, text, sent: false });
 }
@@ -102,7 +174,17 @@ async function runScheduler() {
   saveDB(db);
 }
 
-client.once("ready", () => {
+client.once("ready", async () => {
+  console.log("AOO/MGE module ready");
+
+  for (const guild of client.guilds.cache.values()) {
+    await scheduleCalendarAnnouncements(guild.id);
+  }
+setInterval(async () => {
+  for (const guild of client.guilds.cache.values()) {
+    await scheduleCalendarAnnouncements(guild.id);
+  }
+}, 6 * 60 * 60 * 1000); // every 6 hours
   setInterval(runScheduler, 30_000);
 });
 
@@ -119,25 +201,25 @@ client.on("messageCreate", async msg => {
 
   if (cmd === "set_ping_channel" && isOwner(msg)) {
     g.pingChannel = msg.mentions.channels.first()?.id;
-    saveDB(loadDB());
+    const db = loadDB();db[i.guild.id] = g;saveDB(db);
     return msg.reply("✅ Ping channel set");
   }
 
   if (cmd === "set_aoo_role" && isOwner(msg)) {
     g.aooRole = msg.mentions.roles.first()?.id;
-    saveDB(loadDB());
+    const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
     return msg.reply("✅ AOO role set");
   }
 
   if (cmd === "set_mge_role" && isOwner(msg)) {
     g.mgeRole = msg.mentions.roles.first()?.id;
-    saveDB(loadDB());
+    const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
     return msg.reply("✅ MGE role set");
   }
 
   if (cmd === "set_aoo_access" && isOwner(msg)) {
     g.aooAccessRole = msg.mentions.roles.first()?.id;
-    saveDB(loadDB());
+    const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
     return msg.reply("✅ AOO access role set");
   }
 
@@ -169,7 +251,10 @@ Scheduled: ${g.scheduled.length}`
 
     return msg.reply(
       list.length
-        ? list.map(s => formatUTC(new Date(s.time))).join("\n")
+        ? list.map(
+  s => `${formatUTC(new Date(s.time))} — ${s.text.replace(/\n/g," ")}`
+).join("\n")
+
         : "No scheduled pings in next 30 days"
     );
   }
@@ -342,7 +427,7 @@ clearAooSchedules(g);
 schedule(g, startMs - 30*60*1000, g.pingChannel, "🏆 AOO starts in **30 minutes**!");
 schedule(g, startMs - 10*60*1000, g.pingChannel, "🏆 AOO starts in **10 minutes**!");
 
-saveDB(loadDB());
+const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
 return i.update({
   content: "✅ AOO reminders updated (old ones removed)",
   components: []
