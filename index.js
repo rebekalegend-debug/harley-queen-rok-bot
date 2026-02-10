@@ -34,13 +34,14 @@ client.once("ready", () => {
     status: "online",
     activities: [
       {
-        type: 4,              // Custom status
-        name: "custom",       // ✅ REQUIRED (must be a string)
-        state: "Verifying governors 🛡️", // ✅ your text
+        type: 1, // STREAMING
+        name: "Rise of Kingdoms",
+        url: "https://www.twitch.tv/discord", // MUST exist
       },
     ],
   });
 });
+
 
 
 // login ONCE
