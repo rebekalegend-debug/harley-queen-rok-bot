@@ -176,34 +176,67 @@ Scheduled: ${g.scheduled.length}`
 
   /* ----- CALENDAR INFO ----- */
 
-  if (cmd === "next_mge") {
-    const events = await fetchEvents();
-    const ev = events
-      .filter(e => getType(e) === "mge")
-      .map(e => new Date(e.start))
-      .find(d => d > new Date());
+ /* ----- CALENDAR INFO ----- */
 
-    return msg.reply(
-      ev ? `Next MGE: **${formatUTC(ev)}**` : "No upcoming MGE"
-    );
-  }
+if (cmd === "next_mge") {
+  const now = new Date();
+  const events = await fetchEvents();
 
-  if (cmd === "calendar_week") {
-    const now = new Date();
-    const end = new Date(now.getTime() + 7*24*60*60*1000);
-    const events = await fetchEvents();
+  const ev = events
+    .filter(e => getType(e) === "mge")
+    .map(e => {
+      let start = new Date(e.start);
+      let end = new Date(e.end);
 
-    const list = events
-      .map(e => ({ d: new Date(e.start), t: getType(e) }))
-      .filter(e => e.d >= now && e.d <= end)
-      .slice(0, 10);
+      // FIX: all-day events (DTEND is exclusive)
+      if (e.datetype === "date") {
+        end.setUTCDate(end.getUTCDate() - 1);
+        end.setUTCHours(23, 59, 59, 999);
+      }
 
-    return msg.reply(
-      list.length
-        ? list.map(e => `${formatUTC(e.d)} — ${e.t}`).join("\n")
-        : "No events in next 7 days"
-    );
-  }
+      return { start, end };
+    })
+    .filter(e => e.end > now)
+    .sort((a, b) => a.start - b.start)[0];
+
+  return msg.reply(
+    ev
+      ? `Next MGE:\nStart: **${formatUTC(ev.start)}**\nEnd: **${formatUTC(ev.end)}**`
+      : "No upcoming MGE"
+  );
+}
+
+
+ if (cmd === "calendar_week") {
+  const now = new Date();
+  const endWindow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const events = await fetchEvents();
+
+  const list = events
+    .map(e => {
+      let start = new Date(e.start);
+      let end = new Date(e.end);
+
+      // FIX: all-day events
+      if (e.datetype === "date") {
+        end.setUTCDate(end.getUTCDate() - 1);
+        end.setUTCHours(23, 59, 59, 999);
+      }
+
+      return { start, end, type: getType(e) };
+    })
+    .filter(e => e.end >= now && e.start <= endWindow)
+    .sort((a, b) => a.start - b.start)
+    .slice(0, 10);
+
+  return msg.reply(
+    list.length
+      ? list
+          .map(e => `${formatUTC(e.start)} → ${formatUTC(e.end)} — ${e.type}`)
+          .join("\n")
+      : "No events in next 7 days"
+  );
+}
 
   /* ----- AOO DATE + HOUR DROPDOWN ----- */
 
