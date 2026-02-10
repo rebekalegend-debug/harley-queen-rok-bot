@@ -39,6 +39,14 @@ function getGuild(guildId) {
 
 /* ================= HELPERS ================= */
 
+function clearAooSchedules(g) {
+  g.scheduled = g.scheduled.filter(
+    s =>
+      !s.text.includes("AOO starts in **30 minutes**") &&
+      !s.text.includes("AOO starts in **10 minutes**")
+  );
+}
+  
 function isOwner(msg) {
   if (!msg?.guild || !msg?.member) return false;
   return msg.guild.ownerId === msg.member.id;
@@ -282,11 +290,18 @@ client.on("interactionCreate", async i => {
     const [date, hour] = i.values[0].split("|");
     const startMs = Date.parse(`${date}T${hour.padStart(2,"0")}:00:00Z`);
 
-    schedule(g, startMs - 30*60*1000, g.pingChannel, "🏆 AOO starts in **30 minutes**!");
-    schedule(g, startMs - 10*60*1000, g.pingChannel, "🏆 AOO starts in **10 minutes**!");
+    // ❗ overwrite previous AOO reminders
+clearAooSchedules(g);
 
-    saveDB(loadDB());
-    return i.update({ content: "✅ AOO reminders scheduled", components: [] });
+// schedule new ones
+schedule(g, startMs - 30*60*1000, g.pingChannel, "🏆 AOO starts in **30 minutes**!");
+schedule(g, startMs - 10*60*1000, g.pingChannel, "🏆 AOO starts in **10 minutes**!");
+
+saveDB(loadDB());
+return i.update({
+  content: "✅ AOO reminders updated (old ones removed)",
+  components: []
+});
   }
 });
 
