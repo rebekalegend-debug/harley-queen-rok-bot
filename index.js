@@ -1,6 +1,6 @@
 // index.js (ROOT)
 import "dotenv/config";
-import { Client, GatewayIntentBits, Partials } from "discord.js";
+import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
 
 // import modules
 import { setupVerify } from "./modules/verify.js";
@@ -30,6 +30,8 @@ setupAooMgeReminder(client);
 
 // ✅ set bot custom status (ONE place)
 client.once("ready", () => {
+  console.log(`✅ Ready as ${client.user.tag}`);
+
   client.user.setPresence({
     status: "online",
     activities: [
