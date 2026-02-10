@@ -108,10 +108,10 @@ export function setupVerify(client) {
     screenshotDone.delete(member.id);
 
     await channel.send(
-`👋 Welcome ${member}!
+`Welcome ${member}💗!
 
 Please upload a screenshot of your **Rise of Kingdoms profile** here.
-After that, click the button to unlock the server.`
+📸👉🪪.`
     );
   });
 
@@ -223,7 +223,7 @@ After that, click the button to unlock the server.`
     const row = new ActionRowBuilder().addComponents(button);
 
     await message.reply({
-      content: "Great! Click below to enter your **Governor ID** (numbers only).",
+      content: "Great! Enter your **Governor ID** (numbers only)(Ex:012345678)🆔👉🔢.",
       components: [row]
     });
   });
@@ -241,7 +241,7 @@ After that, click the button to unlock the server.`
       if (interaction.isButton()) {
         const [key, uid] = interaction.customId.split(":");
         if (key !== "verify_id" || interaction.user.id !== uid) {
-          return interaction.reply({ content: "This button isn’t for you.", ephemeral: true });
+          return interaction.reply({ content: "You trying to steal! This button isn’t for you.😂", ephemeral: true });
         }
 
         const modal = new ModalBuilder()
@@ -281,7 +281,7 @@ After that, click the button to unlock the server.`
 
         if (!/^\d+$/.test(rawId)) {
           return interaction.reply({
-            content: "❌ Governor ID must contain numbers only.",
+            content: "❌ **Governor ID** must contain numbers only👉🔢🆔, Ex:012345678.",
             ephemeral: true
           });
         }
