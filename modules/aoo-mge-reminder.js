@@ -279,7 +279,7 @@ async function rebuildGuildSchedule(client, guildId) {
         label: `AOO registration OPEN (${fmtUTC(atStart)})`,
         channelId: pingChId,
         message:
-          `@everyone 📢 **AOO registration is OPEN!**\n` +
+          `@everyone 📢 **AOO registration is OPEN!**✅\n` +
           `Reach out to ${aooMention} for registration!\n` +
           `Or react with **🏆** to get registered automatically!\n` +
           `🗓️ Window: ${fmtUTC(startMs)} → ${fmtUTC(endMs)} (UTC)`,
@@ -333,7 +333,7 @@ async function rebuildGuildSchedule(client, guildId) {
     whenMs: open24hAfterEnd,
     label: `MGE registration OPEN (${fmtUTC(open24hAfterEnd)})`,
     channelId: pingChId,
-    message: `@everyone 📢 **MGE registration is OPEN!**
+    message: `@everyone 📢 **MGE registration is OPEN!**✅
 Register in ${regChMention}, or reach out to ${mgeMention}!
 🗓️ Next MGE starts: **${fmtUTC(startMs)}** (UTC)`,
   });
