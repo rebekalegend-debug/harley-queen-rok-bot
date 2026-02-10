@@ -45,8 +45,8 @@ const REFRESH_EVERY_MS = 6 * 60 * 60 * 1000; // refresh schedules every 6 hours
 const MAX_DELAY = 2_147_483_647; // ~24.8 days, safe for 14-day lookahead
 
 const DEFAULTS = {
-  pingChannelId: null, // where AOO messages go
-  mgeChannelId: null, // where MGE messages go
+  pingChannelId: null,          // ✅ where bot posts ALL AOO/MGE messages
+  mgeRegisterChannelId: null,   // ✅ channel to mention in MGE text
   aooTeamRoleId: null,
   mgeTeamRoleId: null,
 };
@@ -299,7 +299,7 @@ async function rebuildGuildSchedule(client, guildId) {
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
 
     // Use mge channel for MGE
-    if (!mgeChId) continue;
+    if (!pingChId) continue;
 
     const mgeMention = cfg.mgeTeamRoleId ? `<@&${cfg.mgeTeamRoleId}>` : "@mgeteamrole";
 
@@ -311,7 +311,7 @@ async function rebuildGuildSchedule(client, guildId) {
       items.push({
         whenMs: open24hAfterEnd,
         label: `MGE registration OPEN (${fmtUTC(open24hAfterEnd)})`,
-        channelId: mgeChId,
+        channelId: pingChId,
         message:
           `📢 **MGE registration is OPEN!**\n` +
           `Register in **#mechannel**, or reach out to ${mgeMention}!\n` +
@@ -323,7 +323,7 @@ async function rebuildGuildSchedule(client, guildId) {
       items.push({
         whenMs: closeWarn48hBeforeStart,
         label: `MGE registration closing soon (${fmtUTC(closeWarn48hBeforeStart)})`,
-        channelId: mgeChId,
+        channelId: pingChId,
         message:
           `⚠️ **MGE registration closes in 24 hours!**\n` +
           `Don’t forget to apply.\n` +
@@ -335,7 +335,7 @@ async function rebuildGuildSchedule(client, guildId) {
       items.push({
         whenMs: closed24hBeforeStart,
         label: `MGE registration CLOSED (${fmtUTC(closed24hBeforeStart)})`,
-        channelId: mgeChId,
+        channelId: pingChId,
         message: `🔒 **MGE registration is closed.**`,
       });
     }
