@@ -30,12 +30,18 @@ setupAooMgeReminder(client);
 
 // ✅ set bot custom status (ONE place)
 client.once("ready", () => {
-  console.log(`✅ ROOT ready as ${client.user.tag}`);
   client.user.setPresence({
     status: "online",
-    activities: [{ type: 4, state: "Verifying governors 🛡️" }],
+    activities: [
+      {
+        type: 4,              // Custom status
+        name: "custom",       // ✅ REQUIRED (must be a string)
+        state: "Verifying governors 🛡️", // ✅ your text
+      },
+    ],
   });
 });
+
 
 // login ONCE
 client.login(process.env.DISCORD_TOKEN);
