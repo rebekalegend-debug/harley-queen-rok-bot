@@ -3,191 +3,137 @@ import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
   Events,
-  PermissionFlagsBits,
 } from "discord.js";
 import ical from "node-ical";
-import fs from "fs";
 
-const PREFIX = "!aoo";
+/* ================= CONFIG ================= */
+
+const PREFIX = "!";
 const ICS_URL =
   "https://calendar.google.com/calendar/ical/5589780017d3612c518e01669b77b70f667a6cee4798c961dbfb9cf1119811f3%40group.calendar.google.com/public/basic.ics";
 
-const CONFIG_FILE = "./modules/aoomge.config.json";
+/* ================= STATE ================= */
 
-/* ========== CONFIG STORAGE ========== */
+let scheduledTimeout = null;
+let selectedDayDate = null;
 
-function loadConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-  } catch {
-    return {};
+/* ================= HELPERS ================= */
+
+async function getNextArkBattleDays() {
+  const data = await ical.async.fromURL(ICS_URL);
+  const now = new Date();
+
+  const arkEvent = Object.values(data)
+    .filter((e) => {
+      if (e.type !== "VEVENT") return false;
+      if (!e.summary || !e.start) return false;
+
+      const name = e.summary.toLowerCase();
+      const isArk =
+        name.includes("ark of osiris") ||
+        (name.includes("ark") && name.includes("battle"));
+
+      return isArk && e.start > now;
+    })
+    .sort((a, b) => a.start - b.start)[0]; // ✅ ONLY NEXT ARK
+
+  if (!arkEvent) return null;
+
+  const day1 = new Date(arkEvent.start);
+  const day2 = new Date(arkEvent.start.getTime() + 24 * 60 * 60 * 1000);
+
+  return [day1, day2];
+}
+
+function scheduleReminder(channel, date) {
+  if (scheduledTimeout) {
+    clearTimeout(scheduledTimeout);
+    scheduledTimeout = null;
   }
-}
-function saveConfig(c) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(c, null, 2));
-}
 
-/* ========== HELPERS ========== */
-
-function isAdmin(m) {
-  return m.permissions.has(PermissionFlagsBits.Administrator);
-}
-
-function schedule(channel, when, text) {
-  const delay = when - Date.now();
+  const delay = date.getTime() - Date.now();
   if (delay <= 0) return;
-  setTimeout(() => channel.send(text), delay);
+
+  scheduledTimeout = setTimeout(async () => {
+    await channel.send(
+      `@everyone ⏰ **ARK OF OSIRIS STARTING!**\n🗓️ ${date.toUTCString()}`
+    );
+    scheduledTimeout = null;
+  }, delay);
 }
 
-function isArk(e) {
-  const n = e.summary?.toLowerCase() ?? "";
-  return n.includes("ark of osiris") || (n.includes("ark") && n.includes("battle"));
-}
-function isMGE(e) {
-  return e.summary?.toLowerCase().includes("mightiest");
-}
-
-/* ========== MAIN ========== */
+/* ================= MAIN ================= */
 
 export function setupAooMge(client) {
   client.on(Events.MessageCreate, async (msg) => {
-    if (!msg.guild || msg.author.bot) return;
+    if (msg.author.bot) return;
+    if (msg.content !== `${PREFIX}aoo`) return;
 
-    const cfg = loadConfig();
-    cfg[msg.guild.id] ??= {};
-    const g = cfg[msg.guild.id];
-
-    /* ===== SET COMMANDS (ADMIN) ===== */
-    if (msg.content.startsWith(`${PREFIX} set`)) {
-      if (!isAdmin(msg.member)) return;
-
-      const [, , key, mention] = msg.content.split(" ");
-      const id = mention?.replace(/\D/g, "");
-      if (!id) return msg.reply("❌ Invalid mention.");
-
-      if (key === "pingchannel") g.pingChannel = id;
-      if (key === "aoorole") g.aooRole = id;
-      if (key === "mgerole") g.mgeRole = id;
-      if (key === "accessrole") g.accessRole = id;
-
-      saveConfig(cfg);
-      return msg.reply("✅ Config updated.");
+    const days = await getNextArkBattleDays();
+    if (!days) {
+      await msg.reply("❌ No upcoming Ark Battle found.");
+      return;
     }
 
-    /* ===== !aoo DROPDOWN ===== */
-    if (msg.content === PREFIX) {
-      if (
-        !isAdmin(msg.member) &&
-        (!g.accessRole || !msg.member.roles.cache.has(g.accessRole))
-      ) {
-        return msg.reply("❌ No access.");
-      }
+    const options = days.map((d, i) => ({
+      label: `Ark Battle – Day ${i + 1}`,
+      description: d.toUTCString(),
+      value: String(d.getTime()),
+    }));
 
-      const data = await ical.async.fromURL(ICS_URL);
-      const now = new Date();
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId("aoo_day")
+      .setPlaceholder("Select Ark Battle day (UTC)")
+      .addOptions(options);
 
-      const ark = Object.values(data)
-        .filter(e => e.type === "VEVENT" && isArk(e) && e.start > now)
-        .sort((a, b) => a.start - b.start)[0];
-
-      if (!ark) return msg.reply("❌ No upcoming Ark.");
-
-      const day1 = new Date(ark.start);
-      const day2 = new Date(day1.getTime() + 86400000);
-
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId("aoo_day")
-        .setPlaceholder("Select Ark day (UTC)")
-        .addOptions([
-          { label: "Ark Day 1", value: day1.getTime().toString() },
-          { label: "Ark Day 2", value: day2.getTime().toString() },
-        ]);
-
-      return msg.reply({
-        content: "🛡️ Select Ark Battle day:",
-        components: [new ActionRowBuilder().addComponents(menu)],
-      });
-    }
+    await msg.reply({
+      content: "🛡️ **Select Ark Battle day:**",
+      components: [new ActionRowBuilder().addComponents(menu)],
+    });
   });
 
-  /* ===== INTERACTIONS ===== */
-  client.on(Events.InteractionCreate, async (i) => {
-    if (!i.isStringSelectMenu()) return;
+  client.on(Events.InteractionCreate, async (interaction) => {
+    if (!interaction.isStringSelectMenu()) return;
 
-    const cfg = loadConfig()[i.guild.id];
-    const channel = await i.guild.channels.fetch(cfg.pingChannel);
+    /* ===== DAY SELECTION ===== */
+    if (interaction.customId === "aoo_day") {
+      selectedDayDate = new Date(Number(interaction.values[0]));
 
-    if (i.customId === "aoo_day") {
-      const base = new Date(Number(i.values[0]));
-      const hours = Array.from({ length: 24 }, (_, h) => ({
-        label: `${String(h).padStart(2, "0")}:00 UTC`,
-        value: `${base.getTime()}|${h}`,
-      }));
+      const hourOptions = [];
+      for (let h = 0; h < 24; h++) {
+        hourOptions.push({
+          label: `${String(h).padStart(2, "0")}:00 UTC`,
+          value: String(h),
+        });
+      }
 
-      const menu = new StringSelectMenuBuilder()
+      const hourMenu = new StringSelectMenuBuilder()
         .setCustomId("aoo_hour")
-        .setPlaceholder("Select hour")
-        .addOptions(hours);
+        .setPlaceholder("Select hour (UTC)")
+        .addOptions(hourOptions);
 
-      return i.update({
-        content: "🕒 Select hour:",
-        components: [new ActionRowBuilder().addComponents(menu)],
+      await interaction.update({
+        content: `🕒 **Select hour for ${selectedDayDate.toUTCString().slice(0, 16)} UTC**`,
+        components: [new ActionRowBuilder().addComponents(hourMenu)],
       });
     }
 
-    if (i.customId === "aoo_hour") {
-      const [base, h] = i.values[0].split("|");
-      const d = new Date(Number(base));
-      d.setUTCHours(Number(h), 0, 0, 0);
+    /* ===== HOUR SELECTION ===== */
+    if (interaction.customId === "aoo_hour") {
+      const hour = Number(interaction.values[0]);
 
-      schedule(
-        channel,
-        d,
-        `@everyone ⏰ **ARK OF OSIRIS STARTING!**\n🗓️ ${d.toUTCString()}`
-      );
+      const finalDate = new Date(selectedDayDate);
+      finalDate.setUTCHours(hour, 0, 0, 0);
 
-      return i.update({ content: "✅ AOO reminder set.", components: [] });
-    }
-  });
+      scheduleReminder(interaction.channel, finalDate);
 
-  /* ===== AUTO REGISTRATION REMINDERS (ON READY) ===== */
-  client.once(Events.ClientReady, async () => {
-    const data = await ical.async.fromURL(ICS_URL);
-    const now = new Date();
-
-    for (const [guildId, g] of Object.entries(loadConfig())) {
-      const guild = await client.guilds.fetch(guildId).catch(() => null);
-      if (!guild || !g.pingChannel) continue;
-
-      const ch = await guild.channels.fetch(g.pingChannel);
-
-      const ark = Object.values(data)
-        .filter(e => e.type === "VEVENT" && isArk(e) && e.start > now)
-        .sort((a, b) => a.start - b.start)[0];
-
-      if (ark) {
-        const start = new Date(ark.start);
-        const end = new Date(start.getTime() + 48 * 3600000);
-
-        schedule(ch, start, `📢 AOO registration is opened, reach out to <@&${g.aooRole}> for registration!`);
-        schedule(ch, end - 6 * 3600000, "⏳ AOO registration will close soon!");
-        schedule(ch, end, "🔒 AOO registration closed");
-      }
-
-      const mge = Object.values(data)
-        .filter(e => e.type === "VEVENT" && isMGE(e))
-        .sort((a, b) => a.start - b.start)[0];
-
-      if (mge) {
-        const s = new Date(mge.start);
-        const e = new Date(mge.end);
-
-        schedule(ch, e.getTime() + 24 * 3600000,
-          `🟢 MGE registration is open, register in <#${g.pingChannel}> or reach out to <@&${g.mgeRole}>!`
-        );
-        schedule(ch, s.getTime() - 48 * 3600000, "⏳ MGE registration closes in 24 hours!");
-        schedule(ch, s.getTime() - 24 * 3600000, "🔒 MGE registration is closed");
-      }
+      await interaction.update({
+        content:
+          `✅ **AOO reminder set!**\n` +
+          `🗓️ ${finalDate.toUTCString()}\n` +
+          `⚠️ Previous reminder (if any) was overwritten.`,
+        components: [],
+      });
     }
   });
 }
