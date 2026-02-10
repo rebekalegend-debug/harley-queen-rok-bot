@@ -80,6 +80,55 @@ function setCfg(guildId, patch) {
 
 /* ================= UTIL ================= */
 
+
+function mentionOrNone(kind, id) {
+  if (!id) return "**not set**";
+  if (kind === "channel") return `<#${id}>`;
+  if (kind === "role") return `<@&${id}>`;
+  return String(id);
+}
+
+async function sendAooTest(client, guildId) {
+  const cfg = getCfg(guildId);
+  const ch = await safeFetchTextChannel(client, cfg.pingChannelId);
+  if (!ch) return { ok: false, err: "AOO ping channel not set or not accessible." };
+
+  const aooMention = cfg.aooTeamRoleId ? `<@&${cfg.aooTeamRoleId}>` : "@aooteamrole";
+  const fakeStart = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+
+  const msg = await ch.send(
+    `📢 **AOO registration is OPEN!**\n` +
+      `Reach out to ${aooMention} for registration!\n` +
+      `Or react with **🏆** to get registered automatically!\n` +
+      `🧪 **TEST MESSAGE**\n` +
+      `🗓️ Example start (UTC): ${fakeStart.toUTCString()}`
+  ).catch(() => null);
+
+  if (!msg) return { ok: false, err: "Failed to send message (missing permissions?)." };
+
+  await msg.react("🏆").catch(() => {});
+  return { ok: true };
+}
+
+async function sendMgeTest(client, guildId) {
+  const cfg = getCfg(guildId);
+  const ch = await safeFetchTextChannel(client, cfg.mgeChannelId);
+  if (!ch) return { ok: false, err: "MGE channel not set or not accessible." };
+
+  const mgeMention = cfg.mgeTeamRoleId ? `<@&${cfg.mgeTeamRoleId}>` : "@mgeteamrole";
+  const fakeStart = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  const msg = await ch.send(
+    `📢 **MGE registration is OPEN!**\n` +
+      `Register in **#mechannel**, or reach out to ${mgeMention}!\n` +
+      `🧪 **TEST MESSAGE**\n` +
+      `🗓️ Example MGE starts (UTC): ${fakeStart.toUTCString()}`
+  ).catch(() => null);
+
+  if (!msg) return { ok: false, err: "Failed to send message (missing permissions?)." };
+  return { ok: true };
+}
+
 function isManagerOrOwner(msg) {
   const guild = msg.guild;
   const member = msg.member;
@@ -310,18 +359,22 @@ async function rebuildAllSchedules(client) {
 
 function buildHelp() {
   return (
-    "**🗓️ AOO/MGE Reminder Commands**\n" +
+    "**🗓️ Event Reminder Commands**\n" +
+    `\`${PREFIX}revent status\` → show configured channels/roles\n` +
+    `\`${PREFIX}revent pingtest aoo\` → send AOO-style test message (+🏆 reaction)\n` +
+    `\`${PREFIX}revent pingtest mge\` → send MGE-style test message\n` +
     `\`${PREFIX}revent set aooteam @role\` → set AOO team role\n` +
     `\`${PREFIX}revent set mgeteam @role\` → set MGE team role\n` +
     `\`${PREFIX}revent set pingchannel #channel\` → set AOO ping channel\n` +
     `\`${PREFIX}revent set mgechannel #channel\` → set MGE channel\n` +
-    `\`${PREFIX}revent scheduled\` → all scheduled pings next 14 days\n` +
+    `\`${PREFIX}revent scheduled\` → all scheduled pings next ${LOOKAHEAD_DAYS} days\n` +
     `\`${PREFIX}revent next3\` → next 3 upcoming pings\n` +
-    `\`${PREFIX}revent next mge\` / \`${PREFIX}revent next mtg\` → next MGE start date\n` +
+    `\`${PREFIX}revent next mge\` / \`${PREFIX}revent next mtg\` → next event start date\n` +
     `\`${PREFIX}revent next aoo\` → next AOO registration start date\n` +
     `\`${PREFIX}revent refresh\` → rebuild schedules now`
   );
 }
+
 
 async function nextMgeStartUTC() {
   const events = await fetchCalendaaoomges();
@@ -376,6 +429,52 @@ export function setupAooMgeReminder(client) {
     // Restrict setup/management to Manage Server or Owner
     const admin = isManagerOrOwner(msg);
 
+// !revent status
+if (args[0] === "status") {
+  const cfg = getCfg(msg.guild.id);
+
+  const lines = [];
+  lines.push("**🧾 Revent Status**");
+  lines.push(`• AOO ping channel: ${mentionOrNone("channel", cfg.pingChannelId)}`);
+  lines.push(`• MGE channel: ${mentionOrNone("channel", cfg.mgeChannelId)}`);
+  lines.push(`• AOO team role: ${mentionOrNone("role", cfg.aooTeamRoleId)}`);
+  lines.push(`• MGE team role: ${mentionOrNone("role", cfg.mgeTeamRoleId)}`);
+  lines.push("");
+  lines.push(`• Lookahead window: **${LOOKAHEAD_DAYS} days**`);
+  lines.push("• Calendar: **Google ICS**");
+
+  await msg.reply({ content: lines.join("\n"), allowedMentions: { roles: [] } });
+  return;
+}
+
+// !revent pingtest aoo|mge
+if (args[0] === "pingtest") {
+  if (!admin) {
+    await msg.reply("❌ You need **Manage Server** (or be server owner) to use this.");
+    return;
+  }
+
+  const which = (args[1] ?? "").toLowerCase();
+  if (which !== "aoo" && which !== "mge") {
+    await msg.reply(`Usage: \`${PREFIX}revent pingtest aoo\` or \`${PREFIX}revent pingtest mge\``);
+    return;
+  }
+
+  if (which === "aoo") {
+    const res = await sendAooTest(client, msg.guild.id);
+    if (!res.ok) return msg.reply(`❌ ${res.err}`);
+    await msg.reply("✅ Sent AOO test message (with 🏆 reaction).");
+    return;
+  }
+
+  if (which === "mge") {
+    const res = await sendMgeTest(client, msg.guild.id);
+    if (!res.ok) return msg.reply(`❌ ${res.err}`);
+    await msg.reply("✅ Sent MGE test message.");
+    return;
+  }
+}
+    
     // !aoomge set ...
     if (args[0] === "set") {
       if (!admin) {
