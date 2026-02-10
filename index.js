@@ -22,7 +22,7 @@ const client = new Client({
 setupVerify(client);
 setupTemplePinger(client);
 setupRuinsPinger(client);
-setupaoomge(client);
+setupAooMge(client);
 
 // login ONCE
 client.login(process.env.DISCORD_TOKEN);
