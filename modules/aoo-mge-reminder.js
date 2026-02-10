@@ -18,16 +18,16 @@
 //  - 24h BEFORE START: "MGE registration is closed"
 //
 // Commands (prefix !):
-//  !aoomge set aooteam @role
-//  !aoomge set mgeteam @role
-//  !aoomge set pingchannel #channel
-//  !aoomge set mgechannel #channel
-//  !aoomge scheduled          (all scheduled pings next 14 days)
-//  !aoomge next3              (next 3 upcoming pings)
-//  !aoomge next mge           (next MGE start date)
-//  !aoomge next mtg           (alias of mge)
-//  !aoomge next aoo           (next AOO reg start date)
-//  !aoomge refresh            (rebuild schedules now)
+//  !revent set aooteam @role
+//  !revent set mgeteam @role
+//  !revent set pingchannel #channel
+//  !revent set mgechannel #channel
+//  !revent scheduled          (all scheduled pings next 14 days)
+//  !revent next3              (next 3 upcoming pings)
+//  !revent next mge           (next MGE start date)
+//  !revent next mtg           (alias of mge)
+//  !revent next aoo           (next AOO reg start date)
+//  !revent refresh            (rebuild schedules now)
 
 import { Events, ChannelType } from "discord.js";
 import ical from "node-ical";
@@ -39,7 +39,7 @@ const PREFIX = "!";
 const ICS_URL =
   "https://calendar.google.com/calendar/ical/5589780017d3612c518e01669b77b70f667a6cee4798c961dbfb9cf1119811f3%40group.calendar.google.com/public/basic.ics";
 
-const STORE_PREFIX = "aoomge";
+const STORE_PREFIX = "revent";
 const LOOKAHEAD_DAYS = 14;
 const REFRESH_EVERY_MS = 6 * 60 * 60 * 1000; // refresh schedules every 6 hours
 const MAX_DELAY = 2_147_483_647; // ~24.8 days, safe for 14-day lookahead
@@ -287,15 +287,15 @@ async function rebuildAllSchedules(client) {
 function buildHelp() {
   return (
     "**🗓️ AOO/MGE Reminder Commands**\n" +
-    `\`${PREFIX}aoomge set aooteam @role\` → set AOO team role\n` +
-    `\`${PREFIX}aoomge set mgeteam @role\` → set MGE team role\n` +
-    `\`${PREFIX}aoomge set pingchannel #channel\` → set AOO ping channel\n` +
-    `\`${PREFIX}aoomge set mgechannel #channel\` → set MGE channel\n` +
-    `\`${PREFIX}aoomge scheduled\` → all scheduled pings next 14 days\n` +
-    `\`${PREFIX}aoomge next3\` → next 3 upcoming pings\n` +
-    `\`${PREFIX}aoomge next mge\` / \`${PREFIX}aoomge next mtg\` → next MGE start date\n` +
-    `\`${PREFIX}aoomge next aoo\` → next AOO registration start date\n` +
-    `\`${PREFIX}aoomge refresh\` → rebuild schedules now`
+    `\`${PREFIX}revent set aooteam @role\` → set AOO team role\n` +
+    `\`${PREFIX}revent set mgeteam @role\` → set MGE team role\n` +
+    `\`${PREFIX}revent set pingchannel #channel\` → set AOO ping channel\n` +
+    `\`${PREFIX}revent set mgechannel #channel\` → set MGE channel\n` +
+    `\`${PREFIX}revent scheduled\` → all scheduled pings next 14 days\n` +
+    `\`${PREFIX}revent next3\` → next 3 upcoming pings\n` +
+    `\`${PREFIX}revent next mge\` / \`${PREFIX}revent next mtg\` → next MGE start date\n` +
+    `\`${PREFIX}revent next aoo\` → next AOO registration start date\n` +
+    `\`${PREFIX}revent refresh\` → rebuild schedules now`
   );
 }
 
@@ -327,7 +327,7 @@ async function nextAooRegStartUTC() {
 
 /* ================= MAIN ================= */
 
-export function setupAooMgeReminder(client) {
+export function setupreventReminder(client) {
   console.log("[AOO/MGE] reminder module registered");
 
   client.once(Events.ClientReady, async () => {
@@ -352,7 +352,7 @@ export function setupAooMgeReminder(client) {
     // Restrict setup/management to Manage Server or Owner
     const admin = isManagerOrOwner(msg);
 
-    // !aoomge set ...
+    // !revent set ...
     if (args[0] === "set") {
       if (!admin) {
         await msg.reply("❌ You need **Manage Server** (or be server owner) to use this.");
@@ -363,7 +363,7 @@ export function setupAooMgeReminder(client) {
 
       if (key === "aooteam") {
         const role = msg.mentions.roles.first();
-        if (!role) return msg.reply(`Usage: \`${PREFIX}aoomge set aooteam @role\``);
+        if (!role) return msg.reply(`Usage: \`${PREFIX}revent set aooteam @role\``);
         setCfg(msg.guild.id, { aooTeamRoleId: role.id });
         await msg.reply(`✅ AOO team role set to <@&${role.id}>`);
         await rebuildGuildSchedule(client, msg.guild.id).catch(() => {});
@@ -372,7 +372,7 @@ export function setupAooMgeReminder(client) {
 
       if (key === "mgeteam") {
         const role = msg.mentions.roles.first();
-        if (!role) return msg.reply(`Usage: \`${PREFIX}aoomge set mgeteam @role\``);
+        if (!role) return msg.reply(`Usage: \`${PREFIX}revent set mgeteam @role\``);
         setCfg(msg.guild.id, { mgeTeamRoleId: role.id });
         await msg.reply(`✅ MGE team role set to <@&${role.id}>`);
         await rebuildGuildSchedule(client, msg.guild.id).catch(() => {});
@@ -381,7 +381,7 @@ export function setupAooMgeReminder(client) {
 
       if (key === "pingchannel") {
         const ch = msg.mentions.channels.first();
-        if (!ch) return msg.reply(`Usage: \`${PREFIX}aoomge set pingchannel #channel\``);
+        if (!ch) return msg.reply(`Usage: \`${PREFIX}revent set pingchannel #channel\``);
         if (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement) {
           return msg.reply("❌ Please pick a text/announcement channel.");
         }
@@ -393,7 +393,7 @@ export function setupAooMgeReminder(client) {
 
       if (key === "mgechannel") {
         const ch = msg.mentions.channels.first();
-        if (!ch) return msg.reply(`Usage: \`${PREFIX}aoomge set mgechannel #channel\``);
+        if (!ch) return msg.reply(`Usage: \`${PREFIX}revent set mgechannel #channel\``);
         if (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement) {
           return msg.reply("❌ Please pick a text/announcement channel.");
         }
@@ -407,7 +407,7 @@ export function setupAooMgeReminder(client) {
       return;
     }
 
-    // !aoomge refresh
+    // !revent refresh
     if (args[0] === "refresh") {
       if (!admin) {
         await msg.reply("❌ You need **Manage Server** (or be server owner) to use this.");
@@ -418,11 +418,11 @@ export function setupAooMgeReminder(client) {
       return;
     }
 
-    // !aoomge scheduled
+    // !revent scheduled
     if (args[0] === "scheduled") {
       const st = getState(msg.guild.id);
       if (!st.items.length) {
-        await msg.reply("📭 No scheduled pings (or channels not configured). Use `!aoomge refresh` after setup.");
+        await msg.reply("📭 No scheduled pings (or channels not configured). Use `!revent refresh` after setup.");
         return;
       }
       const lines = st.items.map(
@@ -432,7 +432,7 @@ export function setupAooMgeReminder(client) {
       return;
     }
 
-    // !aoomge next3
+    // !revent next3
     if (args[0] === "next3") {
       const st = getState(msg.guild.id);
       const now = Date.now();
@@ -446,7 +446,7 @@ export function setupAooMgeReminder(client) {
       return;
     }
 
-    // !aoomge next ...
+    // !revent next ...
     if (args[0] === "next") {
       const what = (args[1] ?? "").toLowerCase();
 
@@ -462,7 +462,7 @@ export function setupAooMgeReminder(client) {
         return msg.reply(`📅 **Next AOO registration starts (UTC):** ${fmtUTC(ms)}`);
       }
 
-      await msg.reply(`Usage: \`${PREFIX}aoomge next mge\` | \`${PREFIX}aoomge next aoo\``);
+      await msg.reply(`Usage: \`${PREFIX}revent next mge\` | \`${PREFIX}revent next aoo\``);
       return;
     }
 
