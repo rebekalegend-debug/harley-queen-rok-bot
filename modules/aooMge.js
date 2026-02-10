@@ -81,8 +81,15 @@ export function setupAooMge(client) {
     if (!msg.guild || msg.author.bot || !msg.content.startsWith(PREFIX)) return;
 
 // AFTER !set handling
-if (!config.channelId || !config.aooRoleId || !config.mgeRoleId)
-  return msg.reply("❌ Bot not configured. Use `!set` commands.");
+if (cmd === "aoo") {
+  if (!config.aooRoleId)
+    return msg.reply("❌ AOO role not set. Use `!set aoo_role @role`.");
+
+ 
+
+  // continue with aoo logic
+}
+
 
 if (!canUseAoo(msg.member))
   return msg.reply("❌ You need **Admin** or **AOO role**.");
