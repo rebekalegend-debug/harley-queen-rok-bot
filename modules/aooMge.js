@@ -9,12 +9,21 @@ import ical from "node-ical";
 import fs from "fs";
 import path from "path";
 
+export function setupAooMge(client) {
+  console.log("AOO/MGE module loaded");
+}
+
+
+
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const ICS_URL = process.env.ICS_URL;
 
 const PING = process.env.PING_TEXT ?? "@everyone";
 const CHECK_EVERY_MINUTES = Number(process.env.CHECK_EVERY_MINUTES ?? "10");
+
+
+
 
 // Prefix commands
 const PREFIX = process.env.PREFIX ?? "!";
@@ -39,6 +48,8 @@ if (!DISCORD_TOKEN || !CHANNEL_ID || !ICS_URL) {
   console.error("Missing env vars: DISCORD_TOKEN, CHANNEL_ID, ICS_URL");
   process.exit(1);
 }
+
+
 
 ensureStateDir();
 const state = loadState();
