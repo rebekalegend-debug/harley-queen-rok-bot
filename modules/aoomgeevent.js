@@ -8,10 +8,25 @@ import {
 import ical from "node-ical";
 import fs from "fs";
 import path from "path";
+import path from "path";
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
+const CONFIG_FILE = path.join(__dirname, "aoomgeevent.config.json");
+
+let config = {
+  channelId: null,
+};
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
-const ICS_URL = process.env.ICS_URL;
+const channelId = config.channelId;
+if (!channelId) return;
+
+const channel = await client.channels.fetch(channelId);
+if (!channel || !channel.isTextBased()) return;
+
+const ICS_URL = "https://calendar.google.com/calendar/ical/5589780017d3612c518e01669b77b70f667a6cee4798c961dbfb9cf1119811f3@group.calendar.google.com/public/basic.ics";
+
 
 const PING = process.env.PING_TEXT ?? "@everyone";
 const CHECK_EVERY_MINUTES = Number(process.env.CHECK_EVERY_MINUTES ?? "10");
@@ -35,15 +50,21 @@ const MGE_CHANNEL_MENTION = `<#${MGE_CHANNEL_ID}>`;
 const STATE_DIR = process.env.STATE_DIR ?? "/data";
 const stateFile = path.resolve(STATE_DIR, "state.json");
 
-if (!DISCORD_TOKEN || !CHANNEL_ID || !ICS_URL) {
-  console.error("Missing env vars: DISCORD_TOKEN, CHANNEL_ID, ICS_URL");
-  process.exit(1);
-}
-
 ensureStateDir();
 const state = loadState();
 state.scheduled ??= []; // scheduled pings storage
 
+function loadConfig() {
+  try {
+    config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+  } catch {
+    saveConfig(); // create file if missing
+  }
+}
+
+function saveConfig() {
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
 function ensureStateDir() {
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
@@ -489,6 +510,10 @@ function helpText() {
     `- ${PREFIX}scheduled_list -> shows scheduled reminders (UTC)`,
     `- ${PREFIX}ping -> bot health check`,
     `- ${PREFIX}help -> this list`,
+`-${PREFIX}set_channel #channel -> set announcement channel (admin only)`,
+`-${PREFIX}show_channel, show current announcement channel`
+
+    
   ].join("\n");
 }
 
@@ -658,10 +683,40 @@ client.on("messageCreate", async (msg) => {
       return;
     }
 
+if (cmd === "set_channel") {
+  if (!msg.member.permissions.has("Administrator")) {
+    await msg.reply("❌ Only admins can set the announcement channel.");
+    return;
+  }
+
+  const ch = msg.mentions.channels.first();
+  if (!ch) {
+    await msg.reply("Usage: `!set_channel #channel`");
+    return;
+  }
+
+  config.channelId = ch.id;
+  saveConfig();
+
+  await msg.reply(`✅ Announcement channel set to ${ch}`);
+  return;
+}
+
+    
     if (cmd === "help") {
       await msg.reply("```" + helpText() + "```");
       return;
     }
+
+    if (cmd === "show_channel") {
+  if (!config.channelId) {
+    await msg.reply("⚠️ Announcement channel is not set.");
+    return;
+  }
+
+  await msg.reply(`📢 Announcement channel: <#${config.channelId}>`);
+  return;
+}
 
     if (cmd === "mge_start") {
       const next = await getNextEventOfType("mge");
@@ -786,7 +841,7 @@ client.on("messageCreate", async (msg) => {
   }
 });
 export function setupAooMgeEvent(client) {
-  // module is initialized just by being imported
+ loadConfig(); // module is initialized just by being imported
 }
 
 
