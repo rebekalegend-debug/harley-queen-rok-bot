@@ -314,7 +314,12 @@ async function rebuildGuildSchedule(client, guildId) {
         channelId: pingChId,
         message:
           `📢 **MGE registration is OPEN!**\n` +
-          `Register in **#mechannel**, or reach out to ${mgeMention}!\n` +
+          const regChMention = cfg.mgeRegisterChannelId
+  ? `<#${cfg.mgeRegisterChannelId}>`
+  : "**#mechannel**";
+
+`Register in ${regChMention}, or reach out to ${mgeMention}!\n`
+ +
           `🗓️ Next MGE starts: **${fmtUTC(startMs)}** (UTC)`,
       });
     }
@@ -365,7 +370,7 @@ function buildHelp() {
     `\`${PREFIX}revent pingtest mge\` → send MGE-style test message\n` +
     `\`${PREFIX}revent set aooteam @role\` → set AOO team role\n` +
     `\`${PREFIX}revent set mgeteam @role\` → set MGE team role\n` +
-    `\`${PREFIX}revent set pingchannel #channel\` → set AOO ping channel\n` +
+    `\`${PREFIX}revent set pingchannel #channel\` → set ping channel\n` +
     `\`${PREFIX}revent set mgechannel #channel\` → set MGE channel\n` +
     `\`${PREFIX}revent scheduled\` → all scheduled pings next ${LOOKAHEAD_DAYS} days\n` +
     `\`${PREFIX}revent next3\` → next 3 upcoming pings\n` +
