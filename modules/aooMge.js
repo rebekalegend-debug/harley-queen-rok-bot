@@ -11,14 +11,19 @@ import path from "path";
 
 export function setupAooMge(client) {
   console.log("AOO/MGE module loaded");
+
+  client.once("ready", async () => {
+    console.log(`AOO/MGE ready as ${client.user.tag}`);
+  });
+
+  client.on("messageCreate", async (msg) => {
+    if (msg.author.bot) return;
+
+    if (msg.content === "!ping") {
+      await msg.reply("pong");
+    }
+  });
 }
-
-client.once("ready", async () => { ... });
-
-client.on("interactionCreate", async (interaction) => { ... });
-
-client.on("messageCreate", async (msg) => { ... });
-
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
