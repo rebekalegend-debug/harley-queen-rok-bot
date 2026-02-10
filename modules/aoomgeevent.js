@@ -394,26 +394,32 @@ client.on("interactionCreate", async i => {
   const g = getGuild(i.guild.id);
 
   /* ----- DATE PICK ----- */
-  if (i.customId === "aoo_day") {
-    const date = i.values[0];
-    const options = [];
+ if (i.customId === "aoo_day") {
+  await i.deferUpdate(); // ✅ ACK IMMEDIATELY
 
-    for (let h=0; h<24; h++) {
-      options.push({
-        label: `${h}:00 UTC`,
-        value: `${date}|${h}`
-      });
-    }
+  const date = i.values[0];
+  const options = [];
 
-    const row = new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId("aoo_hour")
-        .setPlaceholder("Select hour (UTC)")
-        .addOptions(options)
-    );
-
-    return i.update({ content: `Date selected: **${date}**`, components: [row] });
+  for (let h = 0; h < 24; h++) {
+    options.push({
+      label: `${h}:00 UTC`,
+      value: `${date}|${h}`,
+    });
   }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("aoo_hour")
+      .setPlaceholder("Select hour (UTC)")
+      .addOptions(options)
+  );
+
+  return i.editReply({
+    content: `Date selected: **${date}**`,
+    components: [row],
+  });
+}
+
 
   /* ----- HOUR PICK ----- */
   if (i.customId === "aoo_hour") {
@@ -428,10 +434,23 @@ schedule(g, startMs - 30*60*1000, g.pingChannel, "🏆 AOO starts in **30 minute
 schedule(g, startMs - 10*60*1000, g.pingChannel, "🏆 AOO starts in **10 minutes**!");
 
 const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
-return i.update({
+await i.deferUpdate();
+
+// overwrite previous AOO reminders
+clearAooSchedules(g);
+
+schedule(g, startMs - 30*60*1000, g.pingChannel, "🏆 AOO starts in **30 minutes**!");
+schedule(g, startMs - 10*60*1000, g.pingChannel, "🏆 AOO starts in **10 minutes**!");
+
+const db = loadDB();
+db[i.guild.id] = g;
+saveDB(db);
+
+return i.editReply({
   content: "✅ AOO reminders updated (old ones removed)",
-  components: []
+  components: [],
 });
+
   }
 });
 
