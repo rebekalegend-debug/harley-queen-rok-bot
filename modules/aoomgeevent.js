@@ -1,5 +1,7 @@
-// modules/aoomgeevent.js
+// index.js
 import {
+  Client,
+  GatewayIntentBits,
   ActionRowBuilder,
   StringSelectMenuBuilder,
 } from "discord.js";
@@ -7,451 +9,783 @@ import ical from "node-ical";
 import fs from "fs";
 import path from "path";
 
-export function setupAooMgeEvent(client) {
-
-/* ================= CONFIG ================= */
-
-const PREFIX = "!";
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CHANNEL_ID = process.env.CHANNEL_ID;
 const ICS_URL = process.env.ICS_URL;
-const DATA_FILE = path.resolve("./modules/aooData.json");
 
-/* ================= STORAGE ================= */
+const PING = process.env.PING_TEXT ?? "@everyone";
+const CHECK_EVERY_MINUTES = Number(process.env.CHECK_EVERY_MINUTES ?? "10");
 
-function loadDB() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
-  catch { return {}; }
-}
-function saveDB(db) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
-}
-function getGuild(guildId) {
-  const db = loadDB();
-  db[guildId] ??= {
-    pingChannel: null,
-    aooRole: null,
-    mgeRole: null,
-    aooAccessRole: null,
-    scheduled: []
-  };
-  saveDB(db);
-  return db[guildId];
-}
+// Prefix commands
+const PREFIX = process.env.PREFIX ?? "!";
 
-/* ================= HELPERS ================= */
+// ✅ Roles (you provided IDs)
+const AOO_ROLE_ID = process.env.AOO_ROLE_ID ?? "1470120925856006277";
+const MGE_ROLE_ID = process.env.MGE_ROLE_ID ?? "1470122737002610760";
 
-function alreadyScheduled(g, time, text) {
-  return g.scheduled.some(
-    s => s.time === time && s.text === text
-  );
+// ✅ Mentions
+const AOO_ROLE_MENTION = `<@&${AOO_ROLE_ID}>`;
+const MGE_ROLE_MENTION = `<@&${MGE_ROLE_ID}>`;
+
+// ✅ MGE channel mention (use env var if set; fallback to your ID)
+const MGE_CHANNEL_ID = process.env.MGE_CHANNEL_ID ?? "1469846200042917918";
+const MGE_CHANNEL_MENTION = `<#${MGE_CHANNEL_ID}>`;
+
+// Persistent state (mount Railway Volume at /data)
+const STATE_DIR = process.env.STATE_DIR ?? "/data";
+const stateFile = path.resolve(STATE_DIR, "state.json");
+
+if (!DISCORD_TOKEN || !CHANNEL_ID || !ICS_URL) {
+  console.error("Missing env vars: DISCORD_TOKEN, CHANNEL_ID, ICS_URL");
+  process.exit(1);
 }
 
-  
-function clearAooSchedules(g) {
-  g.scheduled = g.scheduled.filter(
-    s => !s.text.includes("AOO starts in")
-  );
-}
-  
-function isOwner(msg) {
-  if (!msg?.guild || !msg?.member) return false;
-  return msg.guild.ownerId === msg.member.id;
-}
+ensureStateDir();
+const state = loadState();
+state.scheduled ??= []; // scheduled pings storage
 
-function hasAccess(member, g) {
-  if (!member) return false;
-  if (member.id === member.guild.ownerId) return true;
-  return g.aooAccessRole && member.roles.cache.has(g.aooAccessRole);
+function ensureStateDir() {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+  } catch (e) {
+    console.error("Failed to create STATE_DIR:", STATE_DIR, e);
+  }
 }
 
+function loadState() {
+  try {
+    return JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  } catch {
+    return {};
+  }
+}
+function saveState() {
+  try {
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  } catch (e) {
+    console.error("Failed to save state:", e);
+  }
+}
 
-const formatUTC = d =>
-  d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+// ✅ role guard
+function hasAooRole(member) {
+  return member?.roles?.cache?.has(AOO_ROLE_ID);
+}
 
-const addHours = (d, h) => new Date(d.getTime() + h * 3600000);
+// ✅ Robust: accepts either an event object or a string.
+// Reads description + summary + location to find "Type: xyz"
+function getEventType(evOrText = "") {
+  const text =
+    typeof evOrText === "string"
+      ? evOrText
+      : [evOrText?.description, evOrText?.summary, evOrText?.location]
+          .filter(Boolean)
+          .join("\n");
+
+  const m = text.match(/Type:\s*([a-z0-9_]+)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function isoDateUTC(d) {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatUTC(d) {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mi = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi} UTC`;
+}
+
+function addMonthsUTC(date, months) {
+  const d = new Date(date.getTime());
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d;
+}
+
+function addHours(date, hours) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
 
 async function fetchEvents() {
   const data = await ical.fromURL(ICS_URL);
-  return Object.values(data).filter(e => e?.type === "VEVENT");
+  return Object.values(data).filter((e) => e?.type === "VEVENT");
 }
 
-function getType(ev) {
-  const t = [ev.summary, ev.description, ev.location].join("\n");
-  const m = t.match(/Type:\s*(\w+)/i);
-  return m?.[1]?.toLowerCase();
+function makeKey(prefix, ev, suffix) {
+  const uid = ev.uid || "no_uid";
+  const day = isoDateUTC(new Date(ev.start));
+  return `${prefix}_${uid}_${day}_${suffix}`;
 }
 
-/* ================= SCHEDULER ================= */
-async function scheduleCalendarAnnouncements(guildId) {
-  const db = loadDB();
-  const g = db[guildId];
-  if (!g?.pingChannel) return;
+// =================== Scheduled pings (AOO reminders via !aoo dropdown) ===================
 
-  const events = await fetchEvents();
-  const now = Date.now();
+function schedulePing({ channelId, runAtMs, message }) {
+  const id = `${channelId}_${runAtMs}_${Math.random().toString(16).slice(2)}`;
+  state.scheduled.push({
+    id,
+    channelId,
+    runAtMs,
+    message,
+    sent: false,
+  });
+  saveState();
+}
 
-  for (const e of events) {
-    const type = getType(e);
-    if (!type) continue;
+async function processScheduled(client, { silent = false } = {}) {
+  const nowMs = Date.now();
+  let changed = false;
 
-    let start = new Date(e.start);
-    let end = new Date(e.end);
+  for (const item of state.scheduled) {
+    if (item.sent) continue;
 
-    // FIX all-day events
-    if (e.datetype === "date") {
-      end.setUTCDate(end.getUTCDate() - 1);
-      end.setUTCHours(23, 59, 59, 999);
-    }
-
-    /* ===== AOO REGISTRATION ===== */
-    if (type === "ark_registration") {
-      const open = start.getTime();
-      const warn = end.getTime() - 6 * 3600000;
-      const close = end.getTime();
-
-      const aooRole = g.aooRole ? `<@&${g.aooRole}>` : "";
-
-      const items = [
-        [open, `🏆 ${aooRole}\nAOO registration is opened!`],
-        [warn, `⚠️ ${aooRole}\nAOO registration will close soon!`],
-        [close, `❌ ${aooRole}\nAOO registration closed`],
-      ];
-
-      for (const [t, msg] of items) {
-        if (t > now && !alreadyScheduled(g, t, msg)) {
-          g.scheduled.push({ time: t, channelId: g.pingChannel, text: msg, sent: false });
+    if (nowMs >= item.runAtMs) {
+      if (!silent) {
+        try {
+          const ch = await client.channels.fetch(item.channelId);
+          if (ch && ch.isTextBased()) {
+            await ch.send(item.message);
+          }
+        } catch (e) {
+          console.error("Failed to send scheduled ping:", e);
         }
       }
-    }
 
-    /* ===== MGE ===== */
-    if (type === "mge") {
-      const open = end.getTime() + 24 * 3600000;
-      const warn = start.getTime() - 48 * 3600000;
-      const close = start.getTime() - 24 * 3600000;
-
-      const mgeRole = g.mgeRole ? `<@&${g.mgeRole}>` : "";
-
-      const items = [
-        [open, `📢 ${mgeRole}\nMGE registration is open!`],
-        [warn, `⚠️ ${mgeRole}\nMGE registration closes in 24h!`],
-        [close, `❌ ${mgeRole}\nMGE registration closed`],
-      ];
-
-      for (const [t, msg] of items) {
-        if (t > now && !alreadyScheduled(g, t, msg)) {
-          g.scheduled.push({ time: t, channelId: g.pingChannel, text: msg, sent: false });
-        }
-      }
+      item.sent = true;
+      changed = true;
     }
   }
 
-  saveDB(db);
+  const before = state.scheduled.length;
+  state.scheduled = state.scheduled.filter((x) => !x.sent);
+  if (state.scheduled.length !== before) changed = true;
+
+  if (changed) saveState();
 }
 
-  
-function schedule(g, time, channelId, text) {
-  g.scheduled.push({ time, channelId, text, sent: false });
+// ✅ scheduled list helpers
+function formatDuration(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(s / 86400);
+  const hrs = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hrs) parts.push(`${hrs}h`);
+  parts.push(`${mins}m`);
+  return parts.join(" ");
 }
 
-async function runScheduler() {
-  const db = loadDB();
-  const now = Date.now();
-
-  for (const gid in db) {
-    const g = db[gid];
-    for (const s of g.scheduled) {
-      if (!s.sent && now >= s.time) {
-        const ch = await client.channels.fetch(s.channelId).catch(() => null);
-        if (ch?.isTextBased()) {
-          const msg = await ch.send(s.text);
-          await msg.react("🏆").catch(() => {});
-        }
-        s.sent = true;
-      }
+function chunkReplyLines(lines, maxLen = 1800) {
+  const chunks = [];
+  let cur = "";
+  for (const line of lines) {
+    if ((cur + line + "\n").length > maxLen) {
+      chunks.push(cur.trimEnd());
+      cur = "";
     }
-    g.scheduled = g.scheduled.filter(x => !x.sent);
+    cur += line + "\n";
   }
-  saveDB(db);
+  if (cur.trim().length) chunks.push(cur.trimEnd());
+  return chunks;
 }
 
-client.once("ready", async () => {
-  console.log("AOO/MGE module ready");
+// =================== Announcement logic (AOO+MGE only, per your rules) ===================
 
-  for (const guild of client.guilds.cache.values()) {
-    await scheduleCalendarAnnouncements(guild.id);
-  }
-setInterval(async () => {
-  for (const guild of client.guilds.cache.values()) {
-    await scheduleCalendarAnnouncements(guild.id);
-  }
-}, 6 * 60 * 60 * 1000); // every 6 hours
-  setInterval(runScheduler, 30_000);
-});
+function aooOpenMsg() {
+  return `AOO registration is opened, reach out to ${AOO_ROLE_MENTION} for registration!`;
+}
+function aooWarnMsg() {
+  return `AOO registration will close soon, be sure you are registered!`;
+}
+function aooClosedMsg() {
+  return `AOO registration closed`;
+}
 
-/* ================= COMMANDS ================= */
+function mgeOpenMsg() {
+  return `MGE registraton is open, register in ${MGE_CHANNEL_MENTION} channel, or reach out to ${MGE_ROLE_MENTION} !`;
+}
+function mgeWarnMsg() {
+  return `MGE registration closes in 24 hours , dont forget to apply!`;
+}
+function mgeClosedMsg() {
+  return `MGE registration is closed`;
+}
 
-client.on("messageCreate", async msg => {
-  if (!msg.guild || msg.author.bot) return;
-  if (!msg.content.startsWith(PREFIX)) return;
-
-  const g = getGuild(msg.guild.id);
-  const [cmd] = msg.content.slice(1).split(" ");
-
-  /* ----- OWNER CONFIG ----- */
-
-  if (cmd === "set_ping_channel" && isOwner(msg)) {
-    g.pingChannel = msg.mentions.channels.first()?.id;
-    const db = loadDB();db[i.guild.id] = g;saveDB(db);
-    return msg.reply("✅ Ping channel set");
+async function runCheck(client, { silent = false } = {}) {
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  if (!channel || !channel.isTextBased()) {
+    console.error("Channel not found or not text-based.");
+    return;
   }
 
-  if (cmd === "set_aoo_role" && isOwner(msg)) {
-    g.aooRole = msg.mentions.roles.first()?.id;
-    const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
-    return msg.reply("✅ AOO role set");
-  }
-
-  if (cmd === "set_mge_role" && isOwner(msg)) {
-    g.mgeRole = msg.mentions.roles.first()?.id;
-    const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
-    return msg.reply("✅ MGE role set");
-  }
-
-  if (cmd === "set_aoo_access" && isOwner(msg)) {
-    g.aooAccessRole = msg.mentions.roles.first()?.id;
-    const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
-    return msg.reply("✅ AOO access role set");
-  }
-
-  /* ----- STATUS ----- */
-
-  if (cmd === "status") {
-    return msg.reply(
-      `Channel: ${g.pingChannel}
-AOO role: ${g.aooRole}
-MGE role: ${g.mgeRole}
-AOO access: ${g.aooAccessRole}
-Scheduled: ${g.scheduled.length}`
-    );
-  }
-
-  /* ----- SCHEDULE INFO ----- */
-
-  if (cmd === "next_ping") {
-    const n = g.scheduled.sort((a,b)=>a.time-b.time)[0];
-    return msg.reply(n ? `Next ping: ${formatUTC(new Date(n.time))}` : "No scheduled pings");
-  }
-
-  if (cmd === "scheduled_30d") {
-    const now = Date.now();
-    const limit = now + 30*24*60*60*1000;
-    const list = g.scheduled
-      .filter(s => s.time <= limit)
-      .sort((a,b)=>a.time-b.time);
-
-    return msg.reply(
-      list.length
-        ? list.map(
-  s => `${formatUTC(new Date(s.time))} — ${s.text.replace(/\n/g," ")}`
-).join("\n")
-
-        : "No scheduled pings in next 30 days"
-    );
-  }
-
-  /* ----- CALENDAR INFO ----- */
-
- /* ----- CALENDAR INFO ----- */
-
-if (cmd === "next_mge") {
   const now = new Date();
   const events = await fetchEvents();
 
-  const ev = events
-    .filter(e => getType(e) === "mge")
-    .map(e => {
-      let start = new Date(e.start);
-      let end = new Date(e.end);
-
-      // FIX: all-day events (DTEND is exclusive)
-      if (e.datetype === "date") {
-        end.setUTCDate(end.getUTCDate() - 1);
-        end.setUTCHours(23, 59, 59, 999);
-      }
-
-      return { start, end };
-    })
-    .filter(e => e.end > now)
-    .sort((a, b) => a.start - b.start)[0];
-
-  return msg.reply(
-    ev
-      ? `Next MGE:\nStart: **${formatUTC(ev.start)}**\nEnd: **${formatUTC(ev.end)}**`
-      : "No upcoming MGE"
-  );
-}
-
-
- if (cmd === "calendar_week") {
-  const now = new Date();
-  const endWindow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const events = await fetchEvents();
-
-  const list = events
-    .map(e => {
-      let start = new Date(e.start);
-      let end = new Date(e.end);
-
-      // FIX: all-day events
-      if (e.datetype === "date") {
-        end.setUTCDate(end.getUTCDate() - 1);
-        end.setUTCHours(23, 59, 59, 999);
-      }
-
-      return { start, end, type: getType(e) };
-    })
-    .filter(e => e.end >= now && e.start <= endWindow)
-    .sort((a, b) => a.start - b.start)
-    .slice(0, 10);
-
-  return msg.reply(
-    list.length
-      ? list
-          .map(e => `${formatUTC(e.start)} → ${formatUTC(e.end)} — ${e.type}`)
-          .join("\n")
-      : "No events in next 7 days"
-  );
-}
-
-  /* ----- AOO DATE + HOUR DROPDOWN ----- */
-
-  if (cmd === "aoo") {
-    if (!hasAccess(msg.member, g)) return msg.reply("❌ No access");
-
-    const events = await fetchEvents();
-const now = new Date();
-
-const aooEvents = events
-  .filter(e => getType(e) === "ark_battle")
-  .map(e => ({
-    ...e,
-    start: new Date(e.start),
-    end: new Date(e.end)
-  }))
-  .filter(e => e.end > now)          // ⛔ ignore finished AOOs
-  .sort((a, b) => a.start - b.start); // ⏳ nearest first
-
-const ev = aooEvents[0];
-    if (!ev) return msg.reply("No upcoming AOO found");
+  for (const ev of events) {
+    const eventType = getEventType(ev);
+    if (!eventType) continue;
 
     const start = new Date(ev.start);
     const end = new Date(ev.end);
 
-    const days = [];
-    const d = new Date(Date.UTC(
-      start.getUTCFullYear(),
-      start.getUTCMonth(),
-      start.getUTCDate()
-    ));
+    // AOO Registration (ark_registration)
+    if (eventType === "ark_registration") {
+      const openKey = makeKey("AOO_REG", ev, "open_at_start");
+      const warnKey = makeKey("AOO_REG", ev, "6h_before_end");
+      const closeKey = makeKey("AOO_REG", ev, "closed_at_end");
 
-    while (d <= end) {
-      days.push(new Date(d));
-      d.setUTCDate(d.getUTCDate() + 1);
+      const warnTime = addHours(end, -6);
+
+      if (!state[openKey] && now >= start) {
+        if (!silent) await channel.send(`${PING}\n${aooOpenMsg()}`);
+        state[openKey] = true;
+        saveState();
+      }
+
+      if (!state[warnKey] && now >= warnTime && now < end) {
+        if (!silent) await channel.send(`${PING}\n${aooWarnMsg()}`);
+        state[warnKey] = true;
+        saveState();
+      }
+
+      if (!state[closeKey] && now >= end) {
+        if (!silent) await channel.send(`${PING}\n${aooClosedMsg()}`);
+        state[closeKey] = true;
+        saveState();
+      }
     }
 
-    const row = new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId("aoo_day")
-        .setPlaceholder("Select AOO date (UTC)")
-        .addOptions(
-          days.map(x => ({
-            label: x.toISOString().slice(0,10),
-            value: x.toISOString().slice(0,10)
-          }))
-        )
-    );
+    // MGE (mge)
+    if (eventType === "mge") {
+      const openKey = makeKey("MGE", ev, "open_24h_after_end");
+      const warnKey = makeKey("MGE", ev, "48h_before_start_warn_close_24h");
+      const closeKey = makeKey("MGE", ev, "closed_24h_before_start");
 
-    return msg.reply({ content: "Select AOO date:", components: [row] });
+      const openTime = addHours(end, 24);
+      const warnTime = addHours(start, -48);
+      const closeTime = addHours(start, -24);
+
+      if (!state[openKey] && now >= openTime) {
+        if (!silent) await channel.send(`${PING}\n${mgeOpenMsg()}`);
+        state[openKey] = true;
+        saveState();
+      }
+
+      if (!state[warnKey] && now >= warnTime && now < closeTime) {
+        if (!silent) await channel.send(`${PING}\n${mgeWarnMsg()}`);
+        state[warnKey] = true;
+        saveState();
+      }
+
+      if (!state[closeKey] && now >= closeTime && now < start) {
+        if (!silent) await channel.send(`${PING}\n${mgeClosedMsg()}`);
+        state[closeKey] = true;
+        saveState();
+      }
+    }
+  }
+}
+
+// ---------- Prefix command helpers ----------
+
+async function getNextEventOfType(type) {
+  const now = new Date();
+  const events = await fetchEvents();
+
+  const typed = events
+    .filter((ev) => getEventType(ev) === type)
+    .map((ev) => ({ ev, start: new Date(ev.start), end: new Date(ev.end) }))
+    .filter((x) => x.start > now)
+    .sort((a, b) => a.start - b.start);
+
+  return typed[0] || null;
+}
+
+// returns the next *scheduled* announcement (future) based on state + calendar
+async function getNextAnnouncementItem() {
+  const now = new Date();
+  const events = await fetchEvents();
+  const candidates = [];
+
+  for (const ev of events) {
+    const eventType = getEventType(ev);
+    if (!eventType) continue;
+
+    const start = new Date(ev.start);
+    const end = new Date(ev.end);
+
+    if (eventType === "ark_registration") {
+      const openKey = makeKey("AOO_REG", ev, "open_at_start");
+      const warnKey = makeKey("AOO_REG", ev, "6h_before_end");
+      const closeKey = makeKey("AOO_REG", ev, "closed_at_end");
+
+      const warnTime = addHours(end, -6);
+
+      if (!state[openKey] && start > now) candidates.push({ when: start, text: aooOpenMsg(), key: openKey });
+      if (!state[warnKey] && warnTime > now) candidates.push({ when: warnTime, text: aooWarnMsg(), key: warnKey });
+      if (!state[closeKey] && end > now) candidates.push({ when: end, text: aooClosedMsg(), key: closeKey });
+    }
+
+    if (eventType === "mge") {
+      const openKey = makeKey("MGE", ev, "open_24h_after_end");
+      const warnKey = makeKey("MGE", ev, "48h_before_start_warn_close_24h");
+      const closeKey = makeKey("MGE", ev, "closed_24h_before_start");
+
+      const openTime = addHours(end, 24);
+      const warnTime = addHours(start, -48);
+      const closeTime = addHours(start, -24);
+
+      if (!state[openKey] && openTime > now) candidates.push({ when: openTime, text: mgeOpenMsg(), key: openKey });
+      if (!state[warnKey] && warnTime > now) candidates.push({ when: warnTime, text: mgeWarnMsg(), key: warnKey });
+      if (!state[closeKey] && closeTime > now) candidates.push({ when: closeTime, text: mgeClosedMsg(), key: closeKey });
+    }
   }
 
-  if (cmd === "help") {
-    return msg.reply(
-      `Commands:
-!aoo
-!next_ping
-!scheduled_30d
-!next_mge
-!calendar_week
-!status`
-    );
+  candidates.sort((a, b) => a.when - b.when);
+  return candidates[0] || null;
+}
+
+async function getAnnouncementsInNextMonths(months = 2) {
+  const now = new Date();
+  const until = addMonthsUTC(now, months);
+  const events = await fetchEvents();
+  const out = [];
+
+  for (const ev of events) {
+    const eventType = getEventType(ev);
+    if (!eventType) continue;
+
+    const start = new Date(ev.start);
+    const end = new Date(ev.end);
+
+    if (eventType === "ark_registration") {
+      const openKey = makeKey("AOO_REG", ev, "open_at_start");
+      const warnKey = makeKey("AOO_REG", ev, "6h_before_end");
+      const closeKey = makeKey("AOO_REG", ev, "closed_at_end");
+
+      const warnTime = addHours(end, -6);
+
+      if (!state[openKey] && start >= now && start <= until) out.push({ when: start, text: aooOpenMsg(), key: openKey });
+      if (!state[warnKey] && warnTime >= now && warnTime <= until) out.push({ when: warnTime, text: aooWarnMsg(), key: warnKey });
+      if (!state[closeKey] && end >= now && end <= until) out.push({ when: end, text: aooClosedMsg(), key: closeKey });
+    }
+
+    if (eventType === "mge") {
+      const openKey = makeKey("MGE", ev, "open_24h_after_end");
+      const warnKey = makeKey("MGE", ev, "48h_before_start_warn_close_24h");
+      const closeKey = makeKey("MGE", ev, "closed_24h_before_start");
+
+      const openTime = addHours(end, 24);
+      const warnTime = addHours(start, -48);
+      const closeTime = addHours(start, -24);
+
+      if (!state[openKey] && openTime >= now && openTime <= until) out.push({ when: openTime, text: mgeOpenMsg(), key: openKey });
+      if (!state[warnKey] && warnTime >= now && warnTime <= until) out.push({ when: warnTime, text: mgeWarnMsg(), key: warnKey });
+      if (!state[closeKey] && closeTime >= now && closeTime <= until) out.push({ when: closeTime, text: mgeClosedMsg(), key: closeKey });
+    }
   }
-});
 
-/* ================= DROPDOWNS ================= */
+  out.sort((a, b) => a.when - b.when);
 
-client.on("interactionCreate", async i => {
-  if (!i.isStringSelectMenu()) return;
-  const g = getGuild(i.guild.id);
+  const seen = new Set();
+  const deduped = [];
+  for (const x of out) {
+    if (seen.has(x.key)) continue;
+    seen.add(x.key);
+    deduped.push(x);
+  }
 
-  /* ----- DATE PICK ----- */
- if (i.customId === "aoo_day") {
-  await i.deferUpdate(); // ✅ ACK IMMEDIATELY
+  return { items: deduped, until };
+}
 
-  const date = i.values[0];
+// =================== AOO dropdown flow (KEEPED) ===================
+
+// ✅ IMPORTANT: your calendar uses Type: ark_battle for Ark of Osiris
+const AOO_TYPES = new Set(["ark_battle", "aoo"]);
+
+async function getNextAooRunEvent() {
+  const now = new Date();
+  const events = await fetchEvents();
+
+  const aoo = events
+    .filter((ev) => AOO_TYPES.has(getEventType(ev)))
+    .map((ev) => ({
+      uid: ev.uid || "no_uid",
+      start: new Date(ev.start),
+      end: new Date(ev.end),
+    }))
+    .filter((x) => x.end > now)
+    .sort((a, b) => a.start - b.start);
+
+  return aoo[0] || null;
+}
+
+function listUtcDatesInRange(start, end) {
+  const dates = [];
+  const d = new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate(), 0, 0, 0)
+  );
+  const endDay = new Date(
+    Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 0, 0, 0)
+  );
+
+  while (d < endDay) {
+    dates.push(new Date(d.getTime()));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function buildDateSelect({ startMs, endMs, dates }) {
+  const options = dates.slice(0, 25).map((d) => ({
+    label: isoDateUTC(d),
+    value: isoDateUTC(d),
+  }));
+
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`aoo_date|${startMs}|${endMs}`)
+      .setPlaceholder("Select AOO date (UTC)")
+      .addOptions(options)
+  );
+}
+
+function buildHourSelect({ startMs, endMs, dateISO }) {
+  const [yyyy, mm, dd] = dateISO.split("-").map((x) => Number(x));
   const options = [];
 
   for (let h = 0; h < 24; h++) {
-    options.push({
-      label: `${h}:00 UTC`,
-      value: `${date}|${h}`,
-    });
+    const t = Date.UTC(yyyy, mm - 1, dd, h, 0, 0, 0);
+    if (t >= startMs && t < endMs) {
+      options.push({
+        label: `${String(h).padStart(2, "0")}:00 UTC`,
+        value: String(h),
+      });
+    }
   }
 
-  const row = new ActionRowBuilder().addComponents(
+  return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
-      .setCustomId("aoo_hour")
-      .setPlaceholder("Select hour (UTC)")
-      .addOptions(options)
+      .setCustomId(`aoo_hour|${startMs}|${endMs}|${dateISO}`)
+      .setPlaceholder("Select AOO start hour (UTC)")
+      .addOptions(options.length ? options : [{ label: "No valid hours", value: "none" }])
+  );
+}
+
+function helpText() {
+  return [
+    `Commands (prefix: ${PREFIX})`,
+    `- ${PREFIX}mge_start -> shows next MGE start time (UTC)`,
+    `- ${PREFIX}next_announcement -> shows next scheduled announcement time (UTC)`,
+    `- ${PREFIX}announcements_2m -> lists all announcements for next 2 months (UTC)`,
+    `- ${PREFIX}aoo -> dropdown: pick AOO date + hour, schedules 30m/10m pings`,
+    `- ${PREFIX}scheduled_list -> shows scheduled reminders (UTC)`,
+    `- ${PREFIX}ping -> bot health check`,
+    `- ${PREFIX}help -> this list`,
+  ].join("\n");
+}
+
+// =================== Discord client ===================
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+client.once("ready", async () => {
+  console.log(`Logged in as ${client.user.tag}`);
+
+  await runCheck(client, { silent: true });
+  await processScheduled(client, { silent: true });
+
+  await runCheck(client, { silent: false });
+
+  setInterval(
+    () => runCheck(client, { silent: false }).catch(console.error),
+    CHECK_EVERY_MINUTES * 60 * 1000
   );
 
-  return i.editReply({
-    content: `Date selected: **${date}**`,
-    components: [row],
-  });
-}
-
-
-  /* ----- HOUR PICK ----- */
-  if (i.customId === "aoo_hour") {
-    const [date, hour] = i.values[0].split("|");
-    const startMs = Date.parse(`${date}T${hour.padStart(2,"0")}:00:00Z`);
-
-    // ❗ overwrite previous AOO reminders
-clearAooSchedules(g);
-
-// schedule new ones
-schedule(g, startMs - 30*60*1000, g.pingChannel, "🏆 AOO starts in **30 minutes**!");
-schedule(g, startMs - 10*60*1000, g.pingChannel, "🏆 AOO starts in **10 minutes**!");
-
-const db = loadDB(); db[msg.guild.id] = g; saveDB(db);
-await i.deferUpdate();
-
-// overwrite previous AOO reminders
-clearAooSchedules(g);
-
-schedule(g, startMs - 30*60*1000, g.pingChannel, "🏆 AOO starts in **30 minutes**!");
-schedule(g, startMs - 10*60*1000, g.pingChannel, "🏆 AOO starts in **10 minutes**!");
-
-const db = loadDB();
-db[i.guild.id] = g;
-saveDB(db);
-
-return i.editReply({
-  content: "✅ AOO reminders updated (old ones removed)",
-  components: [],
+  setInterval(
+    () => processScheduled(client, { silent: false }).catch(console.error),
+    30 * 1000
+  );
 });
 
+// Handle dropdown interactions (select menus)
+client.on("interactionCreate", async (interaction) => {
+  try {
+    if (!interaction.isStringSelectMenu()) return;
+
+    // 🔒 Role check for dropdowns
+    const member = interaction.member;
+    if (!hasAooRole(member)) {
+      await interaction.reply({
+        content: "❌ You need the **AOO role** to use this menu.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const id = interaction.customId || "";
+
+    if (id.startsWith("aoo_date|")) {
+      const [, startMsStr, endMsStr] = id.split("|");
+      const startMs = Number(startMsStr);
+      const endMs = Number(endMsStr);
+
+      const dateISO = interaction.values?.[0];
+      if (!dateISO) {
+        await interaction.reply({ content: "No date selected.", ephemeral: true });
+        return;
+      }
+
+      const hourRow = buildHourSelect({ startMs, endMs, dateISO });
+
+      await interaction.update({
+        content: `Selected date: **${dateISO}** (UTC)\nNow select the hour (UTC) you want AOO to start.`,
+        components: [hourRow],
+      });
+      return;
+    }
+
+    if (id.startsWith("aoo_hour|")) {
+      const parts = id.split("|");
+      const startMs = Number(parts[1]);
+      const endMs = Number(parts[2]);
+      const dateISO = parts[3];
+
+      const hourStr = interaction.values?.[0];
+      if (!hourStr || hourStr === "none") {
+        await interaction.reply({ content: "No valid hour selected.", ephemeral: true });
+        return;
+      }
+
+      const hour = Number(hourStr);
+      const [yyyy, mm, dd] = dateISO.split("-").map((x) => Number(x));
+      const aooStartMs = Date.UTC(yyyy, mm - 1, dd, hour, 0, 0, 0);
+
+      if (!(aooStartMs >= startMs && aooStartMs < endMs)) {
+        await interaction.reply({
+          content: "That hour is outside the AOO event window. Try again.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const nowMs = Date.now();
+      const thirtyMs = aooStartMs - 30 * 60 * 1000;
+      const tenMs = aooStartMs - 10 * 60 * 1000;
+
+      const channelId = interaction.channelId;
+      let scheduledCount = 0;
+
+      if (thirtyMs > nowMs) {
+        schedulePing({
+          channelId,
+          runAtMs: thirtyMs,
+          message: `${PING}\nAOO starts in **30 minutes** — get ready! (Start: ${formatUTC(
+            new Date(aooStartMs)
+          )})`,
+        });
+        scheduledCount++;
+      }
+
+      if (tenMs > nowMs) {
+        schedulePing({
+          channelId,
+          runAtMs: tenMs,
+          message: `${PING}\nAOO starts in **10 minutes** — be ready! (Start: ${formatUTC(
+            new Date(aooStartMs)
+          )})`,
+        });
+        scheduledCount++;
+      }
+
+      const startText = formatUTC(new Date(aooStartMs));
+      const note =
+        scheduledCount === 0
+          ? "Both reminder times are already in the past, so nothing was scheduled."
+          : `Scheduled **${scheduledCount}** reminder(s).`;
+
+      await interaction.update({
+        content: `✅ AOO start selected: **${startText}**\n${note}`,
+        components: [],
+      });
+
+      return;
+    }
+  } catch (e) {
+    console.error("Interaction error:", e);
+    try {
+      if (interaction.isRepliable()) {
+        await interaction.reply({ content: "Error handling selection.", ephemeral: true });
+      }
+    } catch {}
   }
 });
 
+client.on("messageCreate", async (msg) => {
+  try {
+    if (msg.author?.bot) return;
+    if (!msg.guild) return;
+    if (!msg.content?.startsWith(PREFIX)) return;
+
+    // 🔒 Role check for all prefix commands
+    if (!hasAooRole(msg.member)) {
+      await msg.reply({
+        content: "❌ You need the **AOO role** to use this command.",
+        allowedMentions: { repliedUser: false },
+      });
+      return;
+    }
+
+    const content = msg.content.slice(PREFIX.length).trim();
+    const [cmdRaw] = content.split(/\s+/);
+    const cmd = (cmdRaw || "").toLowerCase();
+
+    if (cmd === "ping") {
+      await msg.reply("pong");
+      return;
+    }
+
+    if (cmd === "help") {
+      await msg.reply("```" + helpText() + "```");
+      return;
+    }
+
+    if (cmd === "mge_start") {
+      const next = await getNextEventOfType("mge");
+      if (!next) {
+        await msg.reply("No upcoming MGE event found in the calendar.");
+        return;
+      }
+      await msg.reply(`Next MGE starts at **${formatUTC(next.start)}**.`);
+      return;
+    }
+
+    // ✅ CHANGED: show next announcement like announcements_2m style
+    if (cmd === "next_announcement") {
+      const next = await getNextAnnouncementItem();
+      if (!next) {
+        await msg.reply("No upcoming announcements found (based on calendar + current state).");
+        return;
+      }
+
+      const lines = [
+        "Next announcement (UTC):",
+        `1) ${formatUTC(next.when)} — ${next.text}`,
+      ];
+
+      await msg.reply("```" + lines.join("\n") + "```");
+      return;
+    }
+
+    if (cmd === "announcements_2m") {
+      const { items, until } = await getAnnouncementsInNextMonths(2);
+
+      if (!items.length) {
+        await msg.reply("No upcoming announcements in the next 2 months (based on calendar + current state).");
+        return;
+      }
+
+      const header = `Upcoming announcements (UTC) until ${formatUTC(until)}:`;
+      const lines = items.map((x, i) => `${i + 1}) ${formatUTC(x.when)} — ${x.text}`);
+
+      const chunks = chunkReplyLines([header, ...lines], 1800);
+      for (const c of chunks) {
+        await msg.reply("```" + c + "```");
+      }
+      return;
+    }
+
+    if (cmd === "scheduled_list") {
+      const nowMs = Date.now();
+      const items = (state.scheduled || [])
+        .filter((x) => !x.sent)
+        .sort((a, b) => a.runAtMs - b.runAtMs);
+
+      if (!items.length) {
+        await msg.reply("No scheduled reminders right now.");
+        return;
+      }
+
+      const lines = [];
+      lines.push(`Scheduled reminders: ${items.length}`);
+      lines.push("");
+
+      const limited = items.slice(0, 40);
+      for (let i = 0; i < limited.length; i++) {
+        const it = limited[i];
+        const when = new Date(it.runAtMs);
+        const inTxt = formatDuration(it.runAtMs - nowMs);
+        const preview = String(it.message || "").replace(/\n/g, " ").slice(0, 120);
+
+        lines.push(
+          `${i + 1}) ${formatUTC(when)} (in ${inTxt}) — ${preview}${preview.length === 120 ? "…" : ""}`
+        );
+      }
+
+      if (items.length > limited.length) {
+        lines.push("");
+        lines.push(`(Showing first ${limited.length} of ${items.length})`);
+      }
+
+      const chunks = chunkReplyLines(lines, 1800);
+      for (const c of chunks) {
+        await msg.reply("```" + c + "```");
+      }
+      return;
+    }
+
+    if (cmd === "aoo") {
+      const aoo = await getNextAooRunEvent();
+      if (!aoo) {
+        await msg.reply(
+          "No upcoming/ongoing AOO run event found. Make sure the calendar event has `Type: ark_battle` (or `Type: aoo`)."
+        );
+        return;
+      }
+
+      const startMs = aoo.start.getTime();
+      const endMs = aoo.end.getTime();
+
+      const dates = listUtcDatesInRange(aoo.start, aoo.end);
+      if (!dates.length) {
+        await msg.reply("AOO event has no selectable dates (check start/end).");
+        return;
+      }
+
+      const dateRow = buildDateSelect({ startMs, endMs, dates });
+
+      await msg.reply({
+        content:
+          `AOO event window (UTC): **${formatUTC(aoo.start)}** → **${formatUTC(aoo.end)}**\n` +
+          `Select the date you want for the AOO start time:`,
+        components: [dateRow],
+      });
+
+      return;
+    }
+
+    await msg.reply(`Unknown command. Try \`${PREFIX}help\``);
+  } catch (e) {
+    console.error("Command error:", e);
+    try {
+      await msg.reply("Error while processing command.");
+    } catch {}
+  }
+});
+export async function initAooMgeModule(client) {
+  // nothing else needed — listeners are already attached
 }
+
