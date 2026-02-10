@@ -54,13 +54,6 @@ const MGE_CHANNEL_MENTION = `<#${MGE_CHANNEL_ID}>`;
 const STATE_DIR = process.env.STATE_DIR ?? "/data";
 const stateFile = path.resolve(STATE_DIR, "state.json");
 
-if (!DISCORD_TOKEN || !CHANNEL_ID || !ICS_URL) {
-  console.error("Missing env vars: DISCORD_TOKEN, CHANNEL_ID, ICS_URL");
-  process.exit(1);
-}
-
-
-
 ensureStateDir();
 const state = loadState();
 state.scheduled ??= []; // scheduled pings storage
