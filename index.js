@@ -6,7 +6,7 @@ import { Client, GatewayIntentBits, Partials } from "discord.js";
 import { setupVerify } from "./modules/verify.js";
 import { setupTemplePinger } from "./modules/templePinger.js";
 import { setupRuinsPinger } from "./modules/ruinsPinger.js";
-import { setupAooMge } from "./modules/aooMge.js";
+import { setupAooMge } from "./modules/aoomge.js";
 
 // create ONE client
 const client = new Client({
@@ -22,7 +22,7 @@ const client = new Client({
 setupVerify(client);
 setupTemplePinger(client);
 setupRuinsPinger(client);
-setupAooMge(client);
+setupaoomge(client);
 
 // login ONCE
 client.login(process.env.DISCORD_TOKEN);
