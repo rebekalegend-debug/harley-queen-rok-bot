@@ -549,13 +549,14 @@ client.on("interactionCreate", async (interaction) => {
 
     // 🔒 Role check for dropdowns
     const member = interaction.member;
-    if (!hasAooRole(member)) {
-      await interaction.reply({
-        content: "❌ You need the **AOO role** to use this menu.",
-        ephemeral: true,
-      });
-      return;
-    }
+   if (!hasAooRole(msg.member)) {
+  await msg.reply({
+    content: "❌ You need the **AOO role** to use this command.",
+    allowedMentions: { repliedUser: false },
+  });
+  return;
+}
+
 
     const id = interaction.customId || "";
 
