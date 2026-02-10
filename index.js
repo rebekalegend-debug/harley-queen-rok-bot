@@ -7,6 +7,7 @@ import { setupVerify } from "./modules/verify.js";
 import { setupTemplePinger } from "./modules/templePinger.js";
 import { setupRuinsPinger } from "./modules/ruinsPinger.js";
 import { setupAooMge } from "./modules/aoomge.js";
+import { setupAooMgeReminder } from "./modules/aoo-mge-reminder.js";
 
 // create ONE client
 const client = new Client({
@@ -24,6 +25,7 @@ setupVerify(client);
 setupTemplePinger(client);
 setupRuinsPinger(client);
 setupAooMge(client);
+setupAooMgeReminder(client);
 
 // login ONCE
 client.login(process.env.DISCORD_TOKEN);
