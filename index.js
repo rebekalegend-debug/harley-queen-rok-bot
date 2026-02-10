@@ -37,7 +37,7 @@ client.once("ready", () => {
     activities: [
       {
         type: 1, // STREAMING
-        name: "Rise of Kingdoms",
+        name: "Prσpєrty σf Hąrlєy👑!",
         url: "https://www.twitch.tv/discord", // MUST exist
       },
     ],
