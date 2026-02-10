@@ -324,7 +324,7 @@ async function rebuildGuildSchedule(client, guildId) {
     const closeWarn48hBeforeStart = startMs - 48 * 60 * 60 * 1000;
     const closed24hBeforeStart = startMs - 24 * 60 * 60 * 1000;
 
-    if (inWindow(open24hAfterEnd, now, end)) {
+   if (inWindow(open24hAfterEnd, now, end)) {
   const regChMention = cfg.mgeRegisterChannelId
     ? `<#${cfg.mgeRegisterChannelId}>`
     : "**#mechannel**";
@@ -333,12 +333,12 @@ async function rebuildGuildSchedule(client, guildId) {
     whenMs: open24hAfterEnd,
     label: `MGE registration OPEN (${fmtUTC(open24hAfterEnd)})`,
     channelId: pingChId,
-    message:
-      `📢 **MGE registration is OPEN!**\n` +
-      `Register in ${regChMention}, or reach out to ${mgeMention}!\n` +
-      `🗓️ Next MGE starts: **${fmtUTC(startMs)}** (UTC)`,
+    message: `📢 **MGE registration is OPEN!**
+Register in ${regChMention}, or reach out to ${mgeMention}!
+🗓️ Next MGE starts: **${fmtUTC(startMs)}** (UTC)`,
   });
 }
+
 
 
     if (inWindow(closeWarn48hBeforeStart, now, end)) {
