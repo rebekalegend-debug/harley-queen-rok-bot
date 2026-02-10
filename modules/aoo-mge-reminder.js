@@ -327,7 +327,7 @@ async function nextAooRegStartUTC() {
 
 /* ================= MAIN ================= */
 
-export function setupaoomgeReminder(client) {
+export function setupAooMgeReminder(client) {
   console.log("[AOO/MGE] reminder module registered");
 
   client.once(Events.ClientReady, async () => {
