@@ -1,5 +1,5 @@
 // modules/aoomge.js
-//only aoo dropdown
+// AOO dropdown + persistent config + persistent schedules (Railway Volume via DATA_DIR)
 import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
@@ -7,9 +7,7 @@ import {
   ChannelType,
 } from "discord.js";
 import ical from "node-ical";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { loadConfig, saveConfig } from "./storage.js";
 
 /* ================= CONFIG ================= */
 
@@ -17,46 +15,45 @@ const PREFIX = "!";
 const ICS_URL =
   "https://calendar.google.com/calendar/ical/5589780017d3612c518e01669b77b70f667a6cee4798c961dbfb9cf1119811f3%40group.calendar.google.com/public/basic.ics";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const CONFIG_FILE = path.join(__dirname, "aoomge.config.json");
+// Node timers: ~24.8 days max delay
+const MAX_DELAY = 2_147_483_647;
 
-/* ================= STORAGE ================= */
+// Storage prefix for this module
+const STORE_PREFIX = "aoo";
 
-function loadConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-  } catch {
-    return {};
-  }
-}
-function saveConfig(cfg) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
-}
-function getGuildCfg(guildId) {
-  const cfg = loadConfig();
-  cfg[guildId] ??= {
-    pingChannelId: null,
-    adminRoleId: null,
-  };
-  saveConfig(cfg);
-  return cfg[guildId];
-}
-function setGuildCfg(guildId, patch) {
-  const cfg = loadConfig();
-  cfg[guildId] ??= { pingChannelId: null, adminRoleId: null };
-  cfg[guildId] = { ...cfg[guildId], ...patch };
-  saveConfig(cfg);
-  return cfg[guildId];
-}
+// What we persist per guild
+const DEFAULTS = {
+  pingChannelId: null,
+  adminRoleId: null,
+  schedules: [], // [{ startMs }]
+};
 
-/* ================= STATE ================= */
+/* ================= RUNTIME STATE ================= */
 
 // schedulesByGuild: guildId -> { items: [{ startMs, oneHourMs, tenMinMs }], timeouts: [Timeout,...] }
 const schedulesByGuild = new Map();
 
 // selectionByUser: `${guildId}:${userId}` -> selectedDayMs
 const selectionByUser = new Map();
+
+/* ================= STORAGE HELPERS ================= */
+
+function getGuildCfg(guildId) {
+  return loadConfig(STORE_PREFIX, guildId, DEFAULTS);
+}
+
+function setGuildCfg(guildId, patch) {
+  const cfg = getGuildCfg(guildId);
+  const next = { ...cfg, ...patch };
+  saveConfig(STORE_PREFIX, guildId, next);
+  return next;
+}
+
+function persistSchedules(guildId, starts) {
+  const cfg = getGuildCfg(guildId);
+  cfg.schedules = starts.map((startMs) => ({ startMs }));
+  saveConfig(STORE_PREFIX, guildId, cfg);
+}
 
 /* ================= HELPERS ================= */
 
@@ -129,9 +126,27 @@ function ensureGuildSchedule(guildId) {
   return schedulesByGuild.get(guildId);
 }
 
+function buildHelp() {
+  return (
+    "**🛡️ AOO Commands**\n" +
+    `\`${PREFIX}aoo\` → open AOO dropdown (admin/owner only)\n` +
+    `\`${PREFIX}aoo set channel #channel\` → set ping channel\n` +
+    `\`${PREFIX}aoo set admin @role\` → set admin role for ALL commands\n` +
+    `\`${PREFIX}aoo scheduled\` → show scheduled AOO pings\n` +
+    `\`${PREFIX}aoo test\` → test ping now in ping channel\n` +
+    `\`${PREFIX}aoo clear\` → clear all scheduled AOO pings\n` +
+    `\`${PREFIX}aoo help\` → show this help`
+  );
+}
+
+/* ================= SCHEDULING (WITH PERSISTENCE) ================= */
+
 function scheduleTwoReminders(guildId, channel, startMs) {
   // overwrite all AOO schedules (your previous behavior)
   clearGuildSchedules(guildId);
+
+  // persist the new schedule (so redeploy restores it)
+  persistSchedules(guildId, [startMs]);
 
   const oneHourMs = startMs - 60 * 60 * 1000;
   const tenMinMs = startMs - 10 * 60 * 1000;
@@ -141,10 +156,6 @@ function scheduleTwoReminders(guildId, channel, startMs) {
   function setReminder(atMs, text) {
     const delay = atMs - Date.now();
     if (delay <= 0) return null;
-
-    // Node timers get weird beyond ~24.8 days; this is a simple guard.
-    // If you schedule very far ahead, re-run !aoo closer to the event.
-    const MAX_DELAY = 2_147_483_647; // ~24.8 days
     if (delay > MAX_DELAY) return null;
 
     const to = setTimeout(async () => {
@@ -167,22 +178,44 @@ function scheduleTwoReminders(guildId, channel, startMs) {
   s.items.push({ startMs, oneHourMs, tenMinMs });
 }
 
-function buildHelp() {
-  return (
-    "**🛡️ AOO Commands**\n" +
-    `\`${PREFIX}aoo\` → open AOO dropdown (admin/owner only)\n` +
-    `\`${PREFIX}aoo set channel #channel\` → set ping channel\n` +
-    `\`${PREFIX}aoo set admin @role\` → set admin role for ALL commands\n` +
-    `\`${PREFIX}aoo scheduled\` → show scheduled AOO pings\n` +
-    `\`${PREFIX}aoo test\` → test ping now in ping channel\n` +
-    `\`${PREFIX}aoo clear\` → clear all scheduled AOO pings\n` +
-    `\`${PREFIX}aoo help\` → show this help`
-  );
+async function restoreSchedulesForGuild(client, guildId) {
+  const cfg = getGuildCfg(guildId);
+  if (!cfg.schedules?.length) return;
+
+  const pingCh = await resolvePingChannel(client, guildId);
+  if (!pingCh) return;
+
+  // Keep only future starts (and also those within timer range)
+  const now = Date.now();
+  const valid = cfg.schedules
+    .map((x) => Number(x.startMs))
+    .filter((ms) => Number.isFinite(ms))
+    .filter((ms) => ms > now + 60 * 1000); // start must be at least 1 min in the future
+
+  if (!valid.length) {
+    // nothing usable, clean it
+    persistSchedules(guildId, []);
+    return;
+  }
+
+  // We only ever keep 1 schedule (overwrite behavior), but safe even if many exist.
+  // Re-arm the latest (max) start time.
+  const startMs = Math.max(...valid);
+
+  // re-schedule (also rewrites persistence to just this one)
+  scheduleTwoReminders(guildId, pingCh, startMs);
 }
 
 /* ================= MAIN ================= */
 
 export function setupAooMge(client) {
+  // Restore schedules after restart/redeploy
+  client.once(Events.ClientReady, async () => {
+    for (const guild of client.guilds.cache.values()) {
+      await restoreSchedulesForGuild(client, guild.id).catch(() => {});
+    }
+  });
+
   client.on(Events.MessageCreate, async (msg) => {
     if (!msg.guild) return;
     if (msg.author.bot) return;
@@ -190,17 +223,18 @@ export function setupAooMge(client) {
 
     const args = msg.content.trim().split(/\s+/).slice(1);
 
-    // Restrict ALL commands to owner/admin (except we still allow help text to show, but action blocked)
     const authed = isOwnerOrAdmin(msg);
 
-    // !aoo help
+    // !aoo help (allowed to show)
     if (args[0] === "help") {
       await msg.reply(buildHelp());
       return;
     }
 
     if (!authed) {
-      await msg.reply("❌ You don’t have access to AOO commands (admin role / server owner only).");
+      await msg.reply(
+        "❌ You don’t have access to AOO commands (admin role / server owner only)."
+      );
       return;
     }
 
@@ -211,7 +245,10 @@ export function setupAooMge(client) {
         await msg.reply(`❌ Usage: \`${PREFIX}aoo set channel #channel\``);
         return;
       }
-      if (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement) {
+      if (
+        ch.type !== ChannelType.GuildText &&
+        ch.type !== ChannelType.GuildAnnouncement
+      ) {
         await msg.reply("❌ Please pick a text channel.");
         return;
       }
@@ -228,7 +265,9 @@ export function setupAooMge(client) {
         return;
       }
       setGuildCfg(msg.guild.id, { adminRoleId: role.id });
-      await msg.reply(`✅ Admin role set to <@&${role.id}> (can use ALL AOO commands).`);
+      await msg.reply(
+        `✅ Admin role set to <@&${role.id}> (can use ALL AOO commands).`
+      );
       return;
     }
 
@@ -236,7 +275,24 @@ export function setupAooMge(client) {
     if (args[0] === "scheduled") {
       const s = schedulesByGuild.get(msg.guild.id);
       if (!s || s.items.length === 0) {
-        await msg.reply("📭 No AOO pings scheduled.");
+        // fall back to persisted info (in case it just restarted and timers aren't set yet)
+        const cfg = getGuildCfg(msg.guild.id);
+        const starts = (cfg.schedules ?? []).map((x) => Number(x.startMs)).filter(Number.isFinite);
+        if (!starts.length) {
+          await msg.reply("📭 No AOO pings scheduled.");
+          return;
+        }
+
+        const startMs = Math.max(...starts);
+        const oneHourMs = startMs - 60 * 60 * 1000;
+        const tenMinMs = startMs - 10 * 60 * 1000;
+
+        await msg.reply(
+          `🗓️ **Scheduled AOO Pings**\n` +
+            `**#1** Start: ${formatUTC(startMs)}\n` +
+            `• 1 hour ping: ${formatUTC(oneHourMs)}\n` +
+            `• 10 min ping: ${formatUTC(tenMinMs)}`
+        );
         return;
       }
 
@@ -253,6 +309,7 @@ export function setupAooMge(client) {
     // !aoo clear
     if (args[0] === "clear") {
       clearGuildSchedules(msg.guild.id);
+      persistSchedules(msg.guild.id, []);
       await msg.reply("✅ Cleared all scheduled AOO pings.");
       return;
     }
@@ -261,10 +318,14 @@ export function setupAooMge(client) {
     if (args[0] === "test") {
       const pingCh = await resolvePingChannel(client, msg.guild.id);
       if (!pingCh) {
-        await msg.reply(`❌ Ping channel not set. Use: \`${PREFIX}aoo set channel #channel\``);
+        await msg.reply(
+          `❌ Ping channel not set. Use: \`${PREFIX}aoo set channel #channel\``
+        );
         return;
       }
-      await pingCh.send("@everyone ✅ **AOO test ping** (this is a test).").catch(() => {});
+      await pingCh
+        .send("@everyone ✅ **AOO test ping** (this is a test).")
+        .catch(() => {});
       await msg.reply("✅ Test ping sent.");
       return;
     }
@@ -272,7 +333,9 @@ export function setupAooMge(client) {
     // Plain !aoo → dropdown flow
     const pingCh = await resolvePingChannel(client, msg.guild.id);
     if (!pingCh) {
-      await msg.reply(`❌ Ping channel not set. Use: \`${PREFIX}aoo set channel #channel\``);
+      await msg.reply(
+        `❌ Ping channel not set. Use: \`${PREFIX}aoo set channel #channel\``
+      );
       return;
     }
 
@@ -306,14 +369,18 @@ export function setupAooMge(client) {
     const authed = isOwnerOrAdmin(interaction);
     if (!authed) {
       await interaction.reply({
-        content: "❌ You don’t have access to AOO commands (admin role / server owner only).",
+        content:
+          "❌ You don’t have access to AOO commands (admin role / server owner only).",
         ephemeral: true,
       });
       return;
     }
 
     // Always schedule in configured ping channel (not wherever they clicked)
-    const pingCh = await resolvePingChannel(interaction.client, interaction.guild.id);
+    const pingCh = await resolvePingChannel(
+      interaction.client,
+      interaction.guild.id
+    );
     if (!pingCh) {
       await interaction.reply({
         content: `❌ Ping channel not set. Use: \`${PREFIX}aoo set channel #channel\``,
@@ -325,7 +392,10 @@ export function setupAooMge(client) {
     /* ===== DAY SELECTION ===== */
     if (interaction.customId === "aoo_day") {
       const selectedDayMs = Number(interaction.values[0]);
-      selectionByUser.set(`${interaction.guild.id}:${interaction.user.id}`, selectedDayMs);
+      selectionByUser.set(
+        `${interaction.guild.id}:${interaction.user.id}`,
+        selectedDayMs
+      );
 
       const hourOptions = [];
       for (let h = 0; h < 24; h++) {
@@ -343,7 +413,9 @@ export function setupAooMge(client) {
       const dayDate = new Date(selectedDayMs);
 
       await interaction.update({
-        content: `🕒 **Select hour for ${dayDate.toUTCString().slice(0, 16)} UTC**`,
+        content: `🕒 **Select hour for ${dayDate
+          .toUTCString()
+          .slice(0, 16)} UTC**`,
         components: [new ActionRowBuilder().addComponents(hourMenu)],
       });
       return;
