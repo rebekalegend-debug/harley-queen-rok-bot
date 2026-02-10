@@ -15,34 +15,35 @@ const ICS_URL =
 /* ================= STATE ================= */
 
 let scheduledTimeout = null;
-let scheduledDate = null;
+let selectedDayDate = null;
 
 /* ================= HELPERS ================= */
 
-async function getNextArkBattles() {
+async function getNextArkBattleDays() {
   const data = await ical.async.fromURL(ICS_URL);
   const now = new Date();
 
-  const arkEvents = Object.values(data)
+  const arkEvent = Object.values(data)
     .filter((e) => {
       if (e.type !== "VEVENT") return false;
       if (!e.summary || !e.start) return false;
 
       const name = e.summary.toLowerCase();
-
-      // ✅ REAL Ark detection
       const isArk =
         name.includes("ark of osiris") ||
-        name.includes("ark") && name.includes("battle");
+        (name.includes("ark") && name.includes("battle"));
 
       return isArk && e.start > now;
     })
-    .sort((a, b) => a.start - b.start)
-    .slice(0, 2);
+    .sort((a, b) => a.start - b.start)[0]; // ✅ ONLY NEXT ARK
 
-  return arkEvents;
+  if (!arkEvent) return null;
+
+  const day1 = new Date(arkEvent.start);
+  const day2 = new Date(arkEvent.start.getTime() + 24 * 60 * 60 * 1000);
+
+  return [day1, day2];
 }
-
 
 function scheduleReminder(channel, date) {
   if (scheduledTimeout) {
@@ -53,62 +54,86 @@ function scheduleReminder(channel, date) {
   const delay = date.getTime() - Date.now();
   if (delay <= 0) return;
 
-  scheduledDate = date;
-
   scheduledTimeout = setTimeout(async () => {
     await channel.send(
-      `@everyone ⏰ **ARK OF OSIRIS STARTING NOW!**\n🗓️ ${date.toUTCString()}`
+      `@everyone ⏰ **ARK OF OSIRIS STARTING!**\n🗓️ ${date.toUTCString()}`
     );
     scheduledTimeout = null;
-    scheduledDate = null;
   }, delay);
 }
 
-/* ================= MAIN EXPORT ================= */
+/* ================= MAIN ================= */
 
 export function setupAooMge(client) {
   client.on(Events.MessageCreate, async (msg) => {
     if (msg.author.bot) return;
     if (msg.content !== `${PREFIX}aoo`) return;
 
-    const events = await getNextArkBattles();
-
-    if (events.length === 0) {
-      await msg.reply("❌ No upcoming Ark Battles found.");
+    const days = await getNextArkBattleDays();
+    if (!days) {
+      await msg.reply("❌ No upcoming Ark Battle found.");
       return;
     }
 
-    const options = events.map((e) => ({
-      label: e.start.toUTCString(),
-      description: "Ark Battle (UTC)",
-      value: String(e.start.getTime()),
+    const options = days.map((d, i) => ({
+      label: `Ark Battle – Day ${i + 1}`,
+      description: d.toUTCString(),
+      value: String(d.getTime()),
     }));
 
     const menu = new StringSelectMenuBuilder()
-      .setCustomId("aoo_select")
-      .setPlaceholder("Select Ark Battle date (UTC)")
+      .setCustomId("aoo_day")
+      .setPlaceholder("Select Ark Battle day (UTC)")
       .addOptions(options);
 
-    const row = new ActionRowBuilder().addComponents(menu);
-
     await msg.reply({
-      content: "🛡️ **Select the Ark of Osiris start date:**",
-      components: [row],
+      content: "🛡️ **Select Ark Battle day:**",
+      components: [new ActionRowBuilder().addComponents(menu)],
     });
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isStringSelectMenu()) return;
-    if (interaction.customId !== "aoo_select") return;
 
-    const timestamp = Number(interaction.values[0]);
-    const date = new Date(timestamp);
+    /* ===== DAY SELECTION ===== */
+    if (interaction.customId === "aoo_day") {
+      selectedDayDate = new Date(Number(interaction.values[0]));
 
-    scheduleReminder(interaction.channel, date);
+      const hourOptions = [];
+      for (let h = 0; h < 24; h++) {
+        hourOptions.push({
+          label: `${String(h).padStart(2, "0")}:00 UTC`,
+          value: String(h),
+        });
+      }
 
-    await interaction.update({
-      content: `✅ **AOO reminder set!**\n🗓️ ${date.toUTCString()}\n⚠️ Previous reminder (if any) was overwritten.`,
-      components: [],
-    });
+      const hourMenu = new StringSelectMenuBuilder()
+        .setCustomId("aoo_hour")
+        .setPlaceholder("Select hour (UTC)")
+        .addOptions(hourOptions);
+
+      await interaction.update({
+        content: `🕒 **Select hour for ${selectedDayDate.toUTCString().slice(0, 16)} UTC**`,
+        components: [new ActionRowBuilder().addComponents(hourMenu)],
+      });
+    }
+
+    /* ===== HOUR SELECTION ===== */
+    if (interaction.customId === "aoo_hour") {
+      const hour = Number(interaction.values[0]);
+
+      const finalDate = new Date(selectedDayDate);
+      finalDate.setUTCHours(hour, 0, 0, 0);
+
+      scheduleReminder(interaction.channel, finalDate);
+
+      await interaction.update({
+        content:
+          `✅ **AOO reminder set!**\n` +
+          `🗓️ ${finalDate.toUTCString()}\n` +
+          `⚠️ Previous reminder (if any) was overwritten.`,
+        components: [],
+      });
+    }
   });
 }
