@@ -37,7 +37,7 @@ client.once("ready", () => {
     activities: [
       {
         type: 1, // STREAMING
-        name: "Prσpєrty σf Hąrlєy👑!",
+        name: "Prσpєrty σf Hąrlєy Quєєη 💗!",
         url: "https://www.twitch.tv/discord", // MUST exist
       },
     ],
