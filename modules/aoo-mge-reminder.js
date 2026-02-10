@@ -340,7 +340,7 @@ export function setupAooMgeReminder(client) {
   client.on(Events.MessageCreate, async (msg) => {
     if (!msg.guild) return;
     if (msg.author.bot) return;
-    if (!msg.content.startsWith(`${PREFIX}aoomge`)) return;
+    if (!msg.content.startsWith(`${PREFIX}revent`)) return;
 
     const args = msg.content.trim().split(/\s+/).slice(1);
 
