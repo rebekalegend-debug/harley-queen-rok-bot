@@ -112,22 +112,39 @@ async function sendAooTest(client, guildId) {
 
 async function sendMgeTest(client, guildId) {
   const cfg = getCfg(guildId);
-  const ch = await safeFetchTextChannel(client, cfg.mgeChannelId);
-  if (!ch) return { ok: false, err: "MGE channel not set or not accessible." };
 
-  const mgeMention = cfg.mgeTeamRoleId ? `<@&${cfg.mgeTeamRoleId}>` : "@mgeteamrole";
+  // ✅ Send ALL MGE pings to the global ping channel
+  const ch = await safeFetchTextChannel(client, cfg.pingChannelId);
+  if (!ch) {
+    return { ok: false, err: "Ping channel not set or not accessible." };
+  }
+
+  // Mention team role (optional)
+  const mgeMention = cfg.mgeTeamRoleId
+    ? `<@&${cfg.mgeTeamRoleId}>`
+    : "@mgeteamrole";
+
+  // Mention register channel (this is what you were missing)
+  const registerChannelMention = cfg.mgeRegisterChannelId
+    ? `<#${cfg.mgeRegisterChannelId}>`
+    : "**#mechannel**";
+
   const fakeStart = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const msg = await ch.send(
     `📢 **MGE registration is OPEN!**\n` +
-      `Register in **#mechannel**, or reach out to ${mgeMention}!\n` +
-      `🧪 **TEST MESSAGE**\n` +
-      `🗓️ Example MGE starts (UTC): ${fakeStart.toUTCString()}`
+    `Register in ${registerChannelMention}, or reach out to ${mgeMention}!\n` +
+    `🧪 **TEST MESSAGE**\n` +
+    `🗓️ Example MGE starts (UTC): ${fakeStart.toUTCString()}`
   ).catch(() => null);
 
-  if (!msg) return { ok: false, err: "Failed to send message (missing permissions?)." };
+  if (!msg) {
+    return { ok: false, err: "Failed to send message (check bot permissions)." };
+  }
+
   return { ok: true };
 }
+
 
 function isManagerOrOwner(msg) {
   const guild = msg.guild;
