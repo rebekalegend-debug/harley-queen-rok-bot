@@ -4,50 +4,46 @@ import path from "node:path";
 
 const BASE_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 
-const DEFAULTS = {
-  targetChannelId: null,
-  pingRoleId: null,
-  allowedRoleId: null,
+/* ================= FS SETUP ================= */
 
-  cycleDays: Number(process.env.TEMPLE_CYCLE_DAYS ?? "7"),
-  pingHoursBefore: Number(process.env.TEMPLE_PING_HOURS_BEFORE ?? "24"),
-  unshieldedHours: Number(process.env.TEMPLE_UNSHIELDED_HOURS ?? "2"),
-
-  nextShieldDropISO: null
-};
-
-// Ensure /data directory exists
 try {
   fs.mkdirSync(BASE_DIR, { recursive: true });
 } catch (e) {
   console.error("❌ Cannot create BASE_DIR:", BASE_DIR, e);
 }
 
-function getPath(guildId) {
-  return path.join(BASE_DIR, `temple_${guildId}.json`);
+/* ================= HELPERS ================= */
+
+function getPath(prefix, guildId) {
+  return path.join(BASE_DIR, `${prefix}_${guildId}.json`);
 }
 
-export function loadConfig(guildId) {
-  const FILE = getPath(guildId);
+/* ================= GENERIC STORAGE ================= */
+
+export function loadConfig(prefix, guildId, defaults = {}) {
+  const FILE = getPath(prefix, guildId);
+
   try {
     if (!fs.existsSync(FILE)) {
-      fs.writeFileSync(FILE, JSON.stringify(DEFAULTS, null, 2), "utf8");
-      return { ...DEFAULTS };
+      fs.writeFileSync(FILE, JSON.stringify(defaults, null, 2), "utf8");
+      return { ...defaults };
     }
+
     const raw = fs.readFileSync(FILE, "utf8");
     const parsed = JSON.parse(raw);
-    return { ...DEFAULTS, ...parsed };
+    return { ...defaults, ...parsed };
   } catch (e) {
-    console.error("[TEMPLE][CONFIG] load error:", e);
-    return { ...DEFAULTS };
+    console.error(`[${prefix.toUpperCase()}][CONFIG] load error:`, e);
+    return { ...defaults };
   }
 }
 
-export function saveConfig(guildId, cfg) {
-  const FILE = getPath(guildId);
+export function saveConfig(prefix, guildId, cfg) {
+  const FILE = getPath(prefix, guildId);
+
   try {
     fs.writeFileSync(FILE, JSON.stringify(cfg, null, 2), "utf8");
   } catch (e) {
-    console.error("[TEMPLE][CONFIG] save error:", e);
+    console.error(`[${prefix.toUpperCase()}][CONFIG] save error:`, e);
   }
 }
