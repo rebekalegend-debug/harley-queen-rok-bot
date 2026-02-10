@@ -34,6 +34,11 @@ const save = () => {
 
 /* ================= HELPERS ================= */
 
+const canUseAoo = (member) =>
+  member.permissions.has("Administrator") ||
+  (config.aooRoleId && member.roles.cache.has(config.aooRoleId));
+
+
 const isAdmin = (m) => m.permissions.has("Administrator");
 const hasAoo = (m) => m.roles.cache.has(config.aooRoleId);
 const utc = (d) => d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
@@ -70,6 +75,14 @@ export function setupAooMge(client) {
   client.on("messageCreate", async (msg) => {
     if (!msg.guild || msg.author.bot || !msg.content.startsWith(PREFIX)) return;
 
+// AFTER !set handling
+if (!config.channelId || !config.aooRoleId || !config.mgeRoleId)
+  return msg.reply("❌ Bot not configured. Use `!set` commands.");
+
+if (!canUseAoo(msg.member))
+  return msg.reply("❌ You need **Admin** or **AOO role**.");
+
+    
     const [cmd, ...args] = msg.content.slice(1).split(/\s+/);
 
     /* --- SETUP --- */
@@ -93,8 +106,9 @@ export function setupAooMge(client) {
     if (!config.channelId || !config.aooRoleId || !config.mgeRoleId)
       return msg.reply("❌ Bot not configured. Use `!set` commands.");
 
-    if (!hasAoo(msg.member))
-      return msg.reply("❌ AOO role required");
+    if (!canUseAoo(msg.member))
+  return msg.reply("❌ You need **Admin** or **AOO role** to use this command.");
+
 
     if (cmd === "ping") return msg.reply("pong");
     if (cmd === "help") return msg.reply("```!aoo\n!scheduled_list\n!ping```");
@@ -141,7 +155,7 @@ export function setupAooMge(client) {
 
   client.on("interactionCreate", async (i) => {
     if (!i.isStringSelectMenu()) return;
-    if (!hasAoo(i.member)) return i.reply({ content: "❌ AOO role required", ephemeral: true });
+    if (!canUseAoo(i.member)) return i.reply({ content: "❌ AOO role required", ephemeral: true });
 
     const [_, start, end] = i.customId.split("|");
     const date = i.values[0];
