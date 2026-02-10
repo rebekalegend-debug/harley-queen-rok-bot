@@ -1,4 +1,5 @@
 // modules/aoomge.js
+//only aoo dropdown
 import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
