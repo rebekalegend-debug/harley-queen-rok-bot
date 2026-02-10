@@ -520,16 +520,17 @@ if (args[0] === "pingtest") {
       }
 
       if (key === "mgechannel") {
-        const ch = msg.mentions.channels.first();
-        if (!ch) return msg.reply(`Usage: \`${PREFIX}revent set mgechannel #channel\``);
-        if (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement) {
-          return msg.reply("❌ Please pick a text/announcement channel.");
-        }
-        setCfg(msg.guild.id, { mgeChannelId: ch.id });
-        await msg.reply(`✅ MGE channel set to <#${ch.id}>`);
-        await rebuildGuildSchedule(client, msg.guild.id).catch(() => {});
-        return;
-      }
+  const ch = msg.mentions.channels.first();
+  if (!ch) return msg.reply(`Usage: \`${PREFIX}revent set mgechannel #channel\``);
+  if (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement) {
+    return msg.reply("❌ Please pick a text/announcement channel.");
+  }
+  setCfg(msg.guild.id, { mgeRegisterChannelId: ch.id });
+  await msg.reply(`✅ MGE register channel (mentioned in pings) set to <#${ch.id}>`);
+  await rebuildGuildSchedule(client, msg.guild.id).catch(() => {});
+  return;
+}
+
 
       await msg.reply(buildHelp());
       return;
