@@ -18,16 +18,16 @@
 //  - 24h BEFORE START: "MGE registration is closed"
 //
 // Commands (prefix !):
-//  !revent set aooteam @role
-//  !revent set mgeteam @role
-//  !revent set pingchannel #channel
-//  !revent set mgechannel #channel
-//  !revent scheduled          (all scheduled pings next 14 days)
-//  !revent next3              (next 3 upcoming pings)
-//  !revent next mge           (next MGE start date)
-//  !revent next mtg           (alias of mge)
-//  !revent next aoo           (next AOO reg start date)
-//  !revent refresh            (rebuild schedules now)
+//  !aoomge set aooteam @role
+//  !aoomge set mgeteam @role
+//  !aoomge set pingchannel #channel
+//  !aoomge set mgechannel #channel
+//  !aoomge scheduled          (all scheduled pings next 14 days)
+//  !aoomge next3              (next 3 upcoming pings)
+//  !aoomge next mge           (next MGE start date)
+//  !aoomge next mtg           (alias of mge)
+//  !aoomge next aoo           (next AOO reg start date)
+//  !aoomge refresh            (rebuild schedules now)
 
 import { Events, ChannelType } from "discord.js";
 import ical from "node-ical";
@@ -39,7 +39,7 @@ const PREFIX = "!";
 const ICS_URL =
   "https://calendar.google.com/calendar/ical/5589780017d3612c518e01669b77b70f667a6cee4798c961dbfb9cf1119811f3%40group.calendar.google.com/public/basic.ics";
 
-const STORE_PREFIX = "revent";
+const STORE_PREFIX = "aoomge";
 const LOOKAHEAD_DAYS = 14;
 const REFRESH_EVERY_MS = 6 * 60 * 60 * 1000; // refresh schedules every 6 hours
 const MAX_DELAY = 2_147_483_647; // ~24.8 days, safe for 14-day lookahead
@@ -105,7 +105,7 @@ async function safeFetchTextChannel(client, id) {
   return ch;
 }
 
-async function fetchCalendarEvents() {
+async function fetchCalendaaoomges() {
   const data = await ical.async.fromURL(ICS_URL);
   return Object.values(data).filter((e) => e?.type === "VEVENT" && e?.start && e?.end);
 }
@@ -163,7 +163,7 @@ async function rebuildGuildSchedule(client, guildId) {
   const now = Date.now();
   const end = now + LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000;
 
-  const events = await fetchCalendarEvents();
+  const events = await fetchCalendaaoomges();
 
   const st = getState(guildId);
   const items = [];
@@ -300,7 +300,7 @@ function buildHelp() {
 }
 
 async function nextMgeStartUTC() {
-  const events = await fetchCalendarEvents();
+  const events = await fetchCalendaaoomges();
   const now = Date.now();
 
   const next = events
@@ -313,7 +313,7 @@ async function nextMgeStartUTC() {
 }
 
 async function nextAooRegStartUTC() {
-  const events = await fetchCalendarEvents();
+  const events = await fetchCalendaaoomges();
   const now = Date.now();
 
   const next = events
@@ -327,7 +327,7 @@ async function nextAooRegStartUTC() {
 
 /* ================= MAIN ================= */
 
-export function setupreventReminder(client) {
+export function setupaoomgeReminder(client) {
   console.log("[AOO/MGE] reminder module registered");
 
   client.once(Events.ClientReady, async () => {
@@ -352,7 +352,7 @@ export function setupreventReminder(client) {
     // Restrict setup/management to Manage Server or Owner
     const admin = isManagerOrOwner(msg);
 
-    // !revent set ...
+    // !aoomge set ...
     if (args[0] === "set") {
       if (!admin) {
         await msg.reply("❌ You need **Manage Server** (or be server owner) to use this.");
@@ -407,7 +407,7 @@ export function setupreventReminder(client) {
       return;
     }
 
-    // !revent refresh
+    // !aoomge refresh
     if (args[0] === "refresh") {
       if (!admin) {
         await msg.reply("❌ You need **Manage Server** (or be server owner) to use this.");
@@ -418,11 +418,11 @@ export function setupreventReminder(client) {
       return;
     }
 
-    // !revent scheduled
+    // !aoomge scheduled
     if (args[0] === "scheduled") {
       const st = getState(msg.guild.id);
       if (!st.items.length) {
-        await msg.reply("📭 No scheduled pings (or channels not configured). Use `!revent refresh` after setup.");
+        await msg.reply("📭 No scheduled pings (or channels not configured). Use `!aoomge refresh` after setup.");
         return;
       }
       const lines = st.items.map(
@@ -432,7 +432,7 @@ export function setupreventReminder(client) {
       return;
     }
 
-    // !revent next3
+    // !aoomge next3
     if (args[0] === "next3") {
       const st = getState(msg.guild.id);
       const now = Date.now();
@@ -446,7 +446,7 @@ export function setupreventReminder(client) {
       return;
     }
 
-    // !revent next ...
+    // !aoomge next ...
     if (args[0] === "next") {
       const what = (args[1] ?? "").toLowerCase();
 
