@@ -14,7 +14,7 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ],
@@ -28,6 +28,14 @@ setupRuinsPinger(client);
 setupAooMge(client);
 setupAooMgeReminder(client);
 
+// ✅ set bot custom status (ONE place)
+client.once("ready", () => {
+  console.log(`✅ ROOT ready as ${client.user.tag}`);
+  client.user.setPresence({
+    status: "online",
+    activities: [{ type: 4, state: "Verifying governors 🛡️" }],
+  });
+});
+
 // login ONCE
 client.login(process.env.DISCORD_TOKEN);
-
