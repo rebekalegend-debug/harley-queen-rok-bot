@@ -97,7 +97,7 @@ async function sendAooTest(client, guildId) {
   const fakeStart = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
 
   const msg = await ch.send(
-    `📢 **AOO registration is OPEN!**\n` +
+    `@everyone 📢 **AOO registration is OPEN!**\n` +
       `Reach out to ${aooMention} for registration!\n` +
       `Or react with **🏆** to get registered automatically!\n` +
       `🧪 **TEST MESSAGE**\n` +
@@ -279,7 +279,7 @@ async function rebuildGuildSchedule(client, guildId) {
         label: `AOO registration OPEN (${fmtUTC(atStart)})`,
         channelId: pingChId,
         message:
-          `📢 **AOO registration is OPEN!**\n` +
+          `@everyone 📢 **AOO registration is OPEN!**\n` +
           `Reach out to ${aooMention} for registration!\n` +
           `Or react with **🏆** to get registered automatically!\n` +
           `🗓️ Window: ${fmtUTC(startMs)} → ${fmtUTC(endMs)} (UTC)`,
@@ -293,7 +293,7 @@ async function rebuildGuildSchedule(client, guildId) {
         label: `AOO registration closing soon (${fmtUTC(beforeEnd6h)})`,
         channelId: pingChId,
         message:
-          `⏳ **AOO registration will close soon!**\n` +
+          `@everyone⏳ **AOO registration will close soon!**\n` +
           `Be sure you are registered.\n` +
           `🗓️ Ends at: **${fmtUTC(endMs)}** (UTC)`,
       });
@@ -304,7 +304,7 @@ async function rebuildGuildSchedule(client, guildId) {
         whenMs: atEnd,
         label: `AOO registration CLOSED (${fmtUTC(atEnd)})`,
         channelId: pingChId,
-        message: `✅ **AOO registration closed.**`,
+        message: `@everyone **AOO registration closed.**❌`,
       });
     }
   }
@@ -333,7 +333,7 @@ async function rebuildGuildSchedule(client, guildId) {
     whenMs: open24hAfterEnd,
     label: `MGE registration OPEN (${fmtUTC(open24hAfterEnd)})`,
     channelId: pingChId,
-    message: `📢 **MGE registration is OPEN!**
+    message: `@everyone 📢 **MGE registration is OPEN!**
 Register in ${regChMention}, or reach out to ${mgeMention}!
 🗓️ Next MGE starts: **${fmtUTC(startMs)}** (UTC)`,
   });
@@ -347,7 +347,7 @@ Register in ${regChMention}, or reach out to ${mgeMention}!
         label: `MGE registration closing soon (${fmtUTC(closeWarn48hBeforeStart)})`,
         channelId: pingChId,
         message:
-          `⚠️ **MGE registration closes in 24 hours!**\n` +
+          `@everyone ⚠️ **MGE registration closes in 24 hours!**\n` +
           `Don’t forget to apply.\n` +
           `🗓️ MGE starts: **${fmtUTC(startMs)}** (UTC)`,
       });
@@ -358,7 +358,7 @@ Register in ${regChMention}, or reach out to ${mgeMention}!
         whenMs: closed24hBeforeStart,
         label: `MGE registration CLOSED (${fmtUTC(closed24hBeforeStart)})`,
         channelId: pingChId,
-        message: `🔒 **MGE registration is closed.**`,
+        message: `@everyone 🔒 **MGE registration is closed.**`,
       });
     }
   }
