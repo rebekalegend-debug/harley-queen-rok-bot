@@ -211,7 +211,19 @@ Scheduled: ${g.scheduled.length}`
     if (!hasAccess(msg.member, g)) return msg.reply("❌ No access");
 
     const events = await fetchEvents();
-    const ev = events.find(e => getType(e) === "ark_battle");
+const now = new Date();
+
+const aooEvents = events
+  .filter(e => getType(e) === "ark_battle")
+  .map(e => ({
+    ...e,
+    start: new Date(e.start),
+    end: new Date(e.end)
+  }))
+  .filter(e => e.end > now)          // ⛔ ignore finished AOOs
+  .sort((a, b) => a.start - b.start); // ⏳ nearest first
+
+const ev = aooEvents[0];
     if (!ev) return msg.reply("No upcoming AOO found");
 
     const start = new Date(ev.start);
