@@ -440,8 +440,8 @@ if (args[0] === "status") {
 
   const lines = [];
   lines.push("**🧾 Revent Status**");
-  lines.push(`• AOO ping channel: ${mentionOrNone("channel", cfg.pingChannelId)}`);
-  lines.push(`• MGE channel: ${mentionOrNone("channel", cfg.mgeChannelId)}`);
+  lines.push(`• Ping channel (AOO+MGE posts): ${mentionOrNone("channel", cfg.pingChannelId)}`);
+l ines.push(`• MGE register channel (mentioned): ${mentionOrNone("channel", cfg.mgeRegisterChannelId)}`);
   lines.push(`• AOO team role: ${mentionOrNone("role", cfg.aooTeamRoleId)}`);
   lines.push(`• MGE team role: ${mentionOrNone("role", cfg.mgeTeamRoleId)}`);
   lines.push("");
