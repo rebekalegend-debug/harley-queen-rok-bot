@@ -231,7 +231,7 @@ function listUtcDates(start, end) {
 
 /* ================= MODULE EXPORT ================= */
 
-export function setupaoomge(client) {
+export function setupAooMge(client) {
   client.once("ready", async () => {
     await runCheck(client);
     await processScheduled(client);
