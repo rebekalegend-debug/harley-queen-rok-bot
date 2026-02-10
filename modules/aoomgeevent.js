@@ -7,7 +7,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-/* ================= MODULE CONFIG ================= */
+/* ================= CONFIG ================= */
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,16 +35,15 @@ const PREFIX = "!";
 const PING = "@everyone";
 
 const AOO_ROLE_ID = "1470120925856006277";
-const MGE_ROLE_ID = "1470122737002610760";
-const MGE_CHANNEL_ID = "1469846200042917918";
+const AOO_COMMAND_ROLE_ID = "1470999999999999"; // 🔒 ONLY THIS ROLE CAN USE !aoo
 
-const AOO_ROLE_MENTION = `<@&${AOO_ROLE_ID}>`;
-const MGE_ROLE_MENTION = `<@&${MGE_ROLE_ID}>`;
-const MGE_CHANNEL_MENTION = `<#${MGE_CHANNEL_ID}>`;
+/* ================= STATE (IN-MEMORY) ================= */
+
+const scheduled = [];
 
 /* ================= HELPERS ================= */
 
-const hasAooRole = (m) => m?.roles?.cache?.has(AOO_ROLE_ID);
+const hasRole = (m, id) => m?.roles?.cache?.has(id);
 
 const formatUTC = (d) =>
   `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
@@ -53,106 +52,154 @@ const formatUTC = (d) =>
     d.getUTCMinutes()
   ).padStart(2, "0")} UTC`;
 
-function getEventType(ev) {
-  const text = [ev.description, ev.summary, ev.location].filter(Boolean).join("\n");
-  const m = text.match(/Type:\s*([a-z0-9_]+)/i);
-  return m ? m[1].toLowerCase() : null;
-}
+const addHours = (d, h) => new Date(d.getTime() + h * 3600000);
 
 async function fetchEvents() {
   const data = await ical.fromURL(ICS_URL);
   return Object.values(data).filter((e) => e?.type === "VEVENT");
 }
 
-/* ================= MESSAGES ================= */
+function getEventType(ev) {
+  const txt = [ev.summary, ev.description].filter(Boolean).join("\n");
+  const m = txt.match(/Type:\s*([a-z0-9_]+)/i);
+  return m ? m[1].toLowerCase() : null;
+}
 
-const aooOpen = () =>
-  `AOO registration is opened, reach out to ${AOO_ROLE_MENTION}!`;
+/* ================= AOO DROPDOWN ================= */
 
-const mgeOpen = () =>
-  `MGE registration is open. Register in ${MGE_CHANNEL_MENTION} or contact ${MGE_ROLE_MENTION}!`;
+function buildDateSelect(start, end) {
+  const opts = [];
+  const d = new Date(start);
+  d.setUTCHours(0, 0, 0, 0);
 
-/* ================= MAIN MODULE ================= */
+  while (d < end) {
+    const iso = d.toISOString().slice(0, 10);
+    opts.push({ label: iso, value: iso });
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`aoo_date|${start.getTime()}|${end.getTime()}`)
+      .setPlaceholder("Select AOO date (UTC)")
+      .addOptions(opts.slice(0, 25))
+  );
+}
+
+function buildHourSelect(dateISO, startMs, endMs) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const opts = [];
+
+  for (let h = 0; h < 24; h++) {
+    const t = Date.UTC(y, m - 1, d, h);
+    if (t >= startMs && t < endMs) {
+      opts.push({ label: `${String(h).padStart(2, "0")}:00 UTC`, value: String(h) });
+    }
+  }
+
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`aoo_hour|${dateISO}|${startMs}|${endMs}`)
+      .setPlaceholder("Select start hour")
+      .addOptions(opts)
+  );
+}
+
+/* ================= MODULE ================= */
 
 export function setupAooMgeEvent(client) {
   loadConfig();
 
+  /* ===== SCHEDULER ===== */
+
+  setInterval(async () => {
+    const now = Date.now();
+    for (const item of scheduled.splice(0)) {
+      if (now >= item.at) {
+        const ch = await client.channels.fetch(item.channelId);
+        if (ch?.isTextBased()) await ch.send(item.msg);
+      } else {
+        scheduled.push(item);
+      }
+    }
+  }, 30_000);
+
+  /* ===== DROPDOWNS ===== */
+
+  client.on("interactionCreate", async (i) => {
+    if (!i.isStringSelectMenu()) return;
+
+    if (!hasRole(i.member, AOO_COMMAND_ROLE_ID)) {
+      await i.reply({ content: "❌ You are not allowed to use AOO scheduling.", ephemeral: true });
+      return;
+    }
+
+    if (i.customId.startsWith("aoo_date")) {
+      const [, s, e] = i.customId.split("|");
+      await i.update({
+        content: "Select AOO start hour (UTC)",
+        components: [buildHourSelect(i.values[0], Number(s), Number(e))],
+      });
+    }
+
+    if (i.customId.startsWith("aoo_hour")) {
+      const [, dateISO, s] = i.customId.split("|");
+      const hour = Number(i.values[0]);
+      const [y, m, d] = dateISO.split("-").map(Number);
+      const start = Date.UTC(y, m - 1, d, hour);
+
+      scheduled.push(
+        { at: start - 30 * 60000, channelId: i.channelId, msg: `${PING}\nAOO starts in **30 minutes**` },
+        { at: start - 10 * 60000, channelId: i.channelId, msg: `${PING}\nAOO starts in **10 minutes**` }
+      );
+
+      await i.update({ content: `✅ AOO scheduled for **${formatUTC(new Date(start))}**`, components: [] });
+    }
+  });
+
+  /* ===== COMMANDS ===== */
+
   client.on("messageCreate", async (msg) => {
     if (!msg.guild || msg.author.bot) return;
     if (!msg.content.startsWith(PREFIX)) return;
-    if (!hasAooRole(msg.member)) {
-      await msg.reply("❌ You need the **AOO role**.");
-      return;
-    }
+    if (!hasRole(msg.member, AOO_ROLE_ID)) return;
 
-    const cmd = msg.content.slice(1).trim().toLowerCase();
+    const cmd = msg.content.slice(1).trim();
 
-    /* ---------- CONFIG COMMANDS ---------- */
-
-    if (cmd.startsWith("set_channel")) {
-      if (!msg.member.permissions.has("Administrator")) {
-        await msg.reply("❌ Admin only.");
-        return;
-      }
+    if (cmd === "set_channel") {
       const ch = msg.mentions.channels.first();
-      if (!ch) {
-        await msg.reply("Usage: `!set_channel #channel`");
-        return;
-      }
+      if (!ch) return msg.reply("Usage: `!set_channel #channel`");
       config.channelId = ch.id;
       saveConfig();
-      await msg.reply(`✅ Announcement channel set to ${ch}`);
-      return;
+      return msg.reply(`✅ Announcement channel set to ${ch}`);
     }
 
-    if (cmd === "show_channel") {
-      if (!config.channelId) {
-        await msg.reply("⚠️ Announcement channel not set.");
-        return;
+    if (cmd === "aoo") {
+      if (!hasRole(msg.member, AOO_COMMAND_ROLE_ID)) {
+        return msg.reply("❌ You are not allowed to schedule AOO.");
       }
-      await msg.reply(`📢 Announcement channel: <#${config.channelId}>`);
-      return;
-    }
 
-    /* ---------- INFO ---------- */
+      const ev = (await fetchEvents()).find(
+        (e) => ["ark_battle", "aoo"].includes(getEventType(e))
+      );
 
-    if (cmd === "ping") {
-      await msg.reply("pong");
-      return;
+      if (!ev) return msg.reply("No upcoming AOO event found.");
+
+      await msg.reply({
+        content: "Select AOO date (UTC)",
+        components: [buildDateSelect(new Date(ev.start), new Date(ev.end))],
+      });
     }
 
     if (cmd === "help") {
       await msg.reply(
         "```" +
           [
-            "!ping",
+            "!aoo  (restricted role)",
             "!set_channel #channel",
-            "!show_channel",
           ].join("\n") +
           "```"
       );
-      return;
-    }
-  });
-
-  /* ---------- AUTO ANNOUNCER ---------- */
-
-  client.once("ready", async () => {
-    if (!config.channelId) return;
-
-    const channel = await client.channels.fetch(config.channelId);
-    if (!channel?.isTextBased()) return;
-
-    const events = await fetchEvents();
-
-    for (const ev of events) {
-      const type = getEventType(ev);
-      if (type === "ark_registration") {
-        await channel.send(`${PING}\n${aooOpen()}`);
-      }
-      if (type === "mge") {
-        await channel.send(`${PING}\n${mgeOpen()}`);
-      }
     }
   });
 }
