@@ -391,7 +391,7 @@ function buildHelp() {
     `\`${PREFIX}revent set mgechannel #channel\` → set MGE channel\n` +
     `\`${PREFIX}revent scheduled\` → all scheduled pings next ${LOOKAHEAD_DAYS} days\n` +
     `\`${PREFIX}revent next3\` → next 3 upcoming pings\n` +
-    `\`${PREFIX}revent next mge\` / \`${PREFIX}revent next mtg\` → next event start date\n` +
+    `\`${PREFIX}revent next mge\` → next event start date\n` +
     `\`${PREFIX}revent next aoo\` → next AOO registration start date\n` +
     `\`${PREFIX}revent refresh\` → rebuild schedules now`
   );
