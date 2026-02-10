@@ -40,7 +40,7 @@ const ICS_URL =
   "https://calendar.google.com/calendar/ical/5589780017d3612c518e01669b77b70f667a6cee4798c961dbfb9cf1119811f3%40group.calendar.google.com/public/basic.ics";
 
 const STORE_PREFIX = "aoomge";
-const LOOKAHEAD_DAYS = 14;
+const LOOKAHEAD_DAYS = 28;
 const REFRESH_EVERY_MS = 6 * 60 * 60 * 1000; // refresh schedules every 6 hours
 const MAX_DELAY = 2_147_483_647; // ~24.8 days, safe for 14-day lookahead
 
@@ -110,16 +110,40 @@ async function fetchCalendaaoomges() {
   return Object.values(data).filter((e) => e?.type === "VEVENT" && e?.start && e?.end);
 }
 
+function normText(e) {
+  const sum = String(e.summary ?? "").toLowerCase();
+  const desc = String(e.description ?? "").toLowerCase();
+  return { sum, desc };
+}
+
+function hasType(e, type) {
+  const { sum, desc } = normText(e);
+  const t = String(type).toLowerCase();
+
+  // Primary: DESCRIPTION contains "Type: mge" etc
+  // Support both "\n" and literal "\n" sequences that sometimes appear
+  const descClean = desc.replace(/\\n/g, "\n");
+  const re = new RegExp(`\\btype\\s*:\\s*${t}\\b`, "i");
+  if (re.test(descClean)) return true;
+
+  // Fallbacks: sometimes the type is in summary
+  if (sum.includes(t)) return true;
+
+  return false;
+}
+
 function isAooRegEvent(e) {
-  const name = String(e.summary ?? "").toLowerCase();
-  return name.includes("ark_registration");
+  return hasType(e, "ark_registration");
 }
 
 function isMgeEvent(e) {
-  const name = String(e.summary ?? "").toLowerCase();
-  // keep it permissive: "mge" anywhere
-  return name.includes("mge");
+  return hasType(e, "mge");
 }
+
+function isMtgEvent(e) {
+  return hasType(e, "mtg"); // "More Than Gems"
+}
+
 
 /* ================= SCHEDULING ================= */
 
