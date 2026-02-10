@@ -132,7 +132,7 @@ async function sendMgeTest(client, guildId) {
   const fakeStart = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const msg = await ch.send(
-    `📢 **MGE registration is OPEN!**\n` +
+    `@everyone 📢 **MGE registration is OPEN!**\n` +
     `Register in ${registerChannelMention}, or reach out to ${mgeMention}!\n` +
     `🧪 **TEST MESSAGE**\n` +
     `🗓️ Example MGE starts (UTC): ${fakeStart.toUTCString()}`
