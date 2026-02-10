@@ -24,18 +24,25 @@ async function getNextArkBattles() {
   const now = new Date();
 
   const arkEvents = Object.values(data)
-    .filter(
-      (e) =>
-        e.type === "VEVENT" &&
-        e.summary &&
-        e.summary.toLowerCase().includes("ark_battle") &&
-        e.start > now
-    )
+    .filter((e) => {
+      if (e.type !== "VEVENT") return false;
+      if (!e.summary || !e.start) return false;
+
+      const name = e.summary.toLowerCase();
+
+      // ✅ REAL Ark detection
+      const isArk =
+        name.includes("ark of osiris") ||
+        name.includes("ark") && name.includes("battle");
+
+      return isArk && e.start > now;
+    })
     .sort((a, b) => a.start - b.start)
     .slice(0, 2);
 
   return arkEvents;
 }
+
 
 function scheduleReminder(channel, date) {
   if (scheduledTimeout) {
