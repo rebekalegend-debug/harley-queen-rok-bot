@@ -40,7 +40,12 @@ const canUseAoo = (member) =>
 
 
 const isAdmin = (m) => m.permissions.has("Administrator");
-const hasAoo = (m) => m.roles.cache.has(config.aooRoleId);
+const canUseAoo = (member) => {
+  if (member.permissions.has("Administrator")) return true;
+  if (!config.aooRoleId) return false;
+  return member.roles.cache.has(config.aooRoleId);
+};
+
 const utc = (d) => d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
 const hours = (d, h) => new Date(d.getTime() + h * 36e5);
 
