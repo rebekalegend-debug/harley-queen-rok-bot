@@ -13,6 +13,11 @@ export function setupAooMge(client) {
   console.log("AOO/MGE module loaded");
 }
 
+client.once("ready", async () => { ... });
+
+client.on("interactionCreate", async (interaction) => { ... });
+
+client.on("messageCreate", async (msg) => { ... });
 
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -796,3 +801,4 @@ client.on("messageCreate", async (msg) => {
     } catch {}
   }
 });
+}
