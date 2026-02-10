@@ -422,7 +422,7 @@ export function setupAooMgeReminder(client) {
     if (args[0] === "scheduled") {
       const st = getState(msg.guild.id);
       if (!st.items.length) {
-        await msg.reply("📭 No scheduled pings (or channels not configured). Use `!aoomge refresh` after setup.");
+        await msg.reply("📭 No scheduled pings (or channels not configured). Use `!revent refresh` after setup.");
         return;
       }
       const lines = st.items.map(
