@@ -127,7 +127,7 @@ async function sendMgeTest(client, guildId) {
   // Mention register channel (this is what you were missing)
   const registerChannelMention = cfg.mgeRegisterChannelId
     ? `<#${cfg.mgeRegisterChannelId}>`
-    : "**#mechannel**";
+    : "**#mgechannel**";
 
   const fakeStart = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
@@ -327,7 +327,7 @@ async function rebuildGuildSchedule(client, guildId) {
    if (inWindow(open24hAfterEnd, now, end)) {
   const regChMention = cfg.mgeRegisterChannelId
     ? `<#${cfg.mgeRegisterChannelId}>`
-    : "**#mechannel**";
+    : "**#mgechannel**";
 
   items.push({
     whenMs: open24hAfterEnd,
