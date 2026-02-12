@@ -32,7 +32,7 @@ function ensureDefaults(db, guildId) {
   if (!db[guildId]) {
     db[guildId] = {
       pingChannelId: null,
-      pingRoleId: null, // ✅ NEW
+      pingRoleId: null, // if null => @everyone
       siteUrl: "https://store.lilith.com/rok",
       messageText: "Prize draws refreshed!🎡➡️🎁",
       buttonText: "Spin now!",
@@ -59,7 +59,7 @@ function setGuildConfig(guildId, patch) {
 
 function nextFridayMidnightUTC(fromDate = new Date()) {
   const now = new Date(fromDate);
-  const day = now.getUTCDay();
+  const day = now.getUTCDay(); // 0 Sun ... 5 Fri
   const targetDay = 5;
 
   const todayMidnightUTC = new Date(
@@ -77,13 +77,11 @@ function nextFridayMidnightUTC(fromDate = new Date()) {
   let daysAhead = (targetDay - day + 7) % 7;
   let target = new Date(todayMidnightUTC.getTime() + daysAhead * 86400000);
 
-  if (daysAhead === 0 && now >= target) {
-    target = new Date(target.getTime() + 7 * 86400000);
-  }
+  // if it's Friday and already at/after 00:00 UTC, schedule next week
+  if (daysAhead === 0 && now >= target) target = new Date(target.getTime() + 7 * 86400000);
 
-  if (target <= now) {
-    target = new Date(target.getTime() + 7 * 86400000);
-  }
+  // safety: ensure in future
+  if (target <= now) target = new Date(target.getTime() + 7 * 86400000);
 
   return target;
 }
@@ -91,13 +89,11 @@ function nextFridayMidnightUTC(fromDate = new Date()) {
 function getNextNFridaysUTC(n = 3) {
   const out = [];
   let base = new Date();
-
   for (let i = 0; i < n; i++) {
     const next = nextFridayMidnightUTC(base);
     out.push(next);
     base = new Date(next.getTime() + 1000);
   }
-
   return out;
 }
 
@@ -120,9 +116,7 @@ async function sendSpinPing(client, guildId) {
       .setURL(cfg.siteUrl)
   );
 
-  const mention = cfg.pingRoleId
-    ? `<@&${cfg.pingRoleId}>`
-    : "@everyone";
+  const mention = cfg.pingRoleId ? `<@&${cfg.pingRoleId}>` : "@everyone";
 
   await channel.send({
     content: `${mention} ${cfg.messageText}`,
@@ -141,7 +135,7 @@ function scheduleGuild(client, guildId) {
   if (!cfg.pingChannelId) return;
 
   const target = nextFridayMidnightUTC();
-  const delay = Math.max(1000, target - Date.now());
+  const delay = Math.max(1000, target.getTime() - Date.now());
 
   const t = setTimeout(async () => {
     try {
@@ -193,9 +187,7 @@ function looksLikeUrl(s) {
 export function setupSpinReminder(client) {
   client.once("ready", () => {
     const db = loadDB();
-    for (const gid of Object.keys(db)) {
-      scheduleGuild(client, gid);
-    }
+    for (const gid of Object.keys(db)) scheduleGuild(client, gid);
     console.log("[spinReminder] ready");
   });
 
@@ -208,8 +200,9 @@ export function setupSpinReminder(client) {
 
     if (!sub || sub === "help") {
       await msg.reply(
-`🎡 Spin Commands
+        `🎡 Spin Commands
 
+!spin status
 !spin show scheduled
 !spin test
 !spin set pingchannel #channel
@@ -221,25 +214,52 @@ export function setupSpinReminder(client) {
       return;
     }
 
-    if (sub === "show" && args[1] === "scheduled") {
+    // !spin status
+    if (sub === "status") {
+      const cfg = getGuildConfig(msg.guild.id);
+      const next = nextFridayMidnightUTC();
+      const unix = Math.floor(next.getTime() / 1000);
+
+      const ch = cfg.pingChannelId ? `<#${cfg.pingChannelId}>` : "**not set**";
+      const role = cfg.pingRoleId ? `<@&${cfg.pingRoleId}>` : "@everyone";
+
+      await msg.reply(
+        [
+          "🎡 **Spin Status**",
+          `• Channel: ${ch}`,
+          `• Ping: ${role}`,
+          `• Next ping: <t:${unix}:F> ( <t:${unix}:R> )`,
+          `• Site: ${cfg.siteUrl}`,
+          `• Button: **${cfg.buttonText}**`,
+          `• Text: ${cfg.messageText}`,
+        ].join("\n")
+      );
+      return;
+    }
+
+    // !spin show scheduled
+    if (sub === "show" && (args[1] ?? "").toLowerCase() === "scheduled") {
       const dates = getNextNFridaysUTC(3);
       const lines = dates.map((d, i) => {
-        const unix = Math.floor(d / 1000);
+        const unix = Math.floor(d.getTime() / 1000);
         return `**${i + 1}.** <t:${unix}:F> (<t:${unix}:R>)`;
       });
       await msg.reply(lines.join("\n"));
       return;
     }
 
+    // !spin test
     if (sub === "test") {
       if (!isAdmin(msg.member)) return;
       await sendSpinPing(client, msg.guild.id);
       return;
     }
 
+    // Admin-only settings
     if (!isAdmin(msg.member)) return;
 
-    if (sub === "set" && args[1] === "pingchannel") {
+    // !spin set pingchannel #channel
+    if (sub === "set" && (args[1] ?? "").toLowerCase() === "pingchannel") {
       const channelId = parseChannelId(args[2]) ?? msg.channel.id;
       setGuildConfig(msg.guild.id, { pingChannelId: channelId });
       scheduleGuild(client, msg.guild.id);
@@ -247,9 +267,13 @@ export function setupSpinReminder(client) {
       return;
     }
 
-    if (sub === "set" && args[1] === "pingrole") {
-      const raw = args[2];
-      if (!raw) return;
+    // !spin set pingrole @role | everyone
+    if (sub === "set" && (args[1] ?? "").toLowerCase() === "pingrole") {
+      const raw = (args[2] ?? "").trim();
+      if (!raw) {
+        await msg.reply("❌ Usage: `!spin set pingrole @Role` (or `everyone`)");
+        return;
+      }
 
       if (raw.toLowerCase() === "everyone") {
         setGuildConfig(msg.guild.id, { pingRoleId: null });
@@ -258,32 +282,51 @@ export function setupSpinReminder(client) {
       }
 
       const roleId = parseRoleId(raw);
-      if (!roleId) return;
+      if (!roleId) {
+        await msg.reply("❌ Invalid role. Example: `!spin set pingrole @SpinPing`");
+        return;
+      }
 
       setGuildConfig(msg.guild.id, { pingRoleId: roleId });
       await msg.reply("✅ Ping role updated.");
       return;
     }
 
-    if (sub === "site" && args[1] === "set") {
+    // !spin site set <url>
+    if (sub === "site" && (args[1] ?? "").toLowerCase() === "set") {
       const url = args[2];
-      if (!looksLikeUrl(url)) return;
+      if (!looksLikeUrl(url)) {
+        await msg.reply("❌ Invalid URL. Example: `!spin site set https://store.lilith.com/rok?tab=perks`");
+        return;
+      }
       setGuildConfig(msg.guild.id, { siteUrl: url });
       await msg.reply("✅ Site updated.");
       return;
     }
 
-    if (sub === "ch" && args[1] === "text") {
-      const text = args.slice(2).join(" ");
-      if (!text) return;
+    // !spin ch text <text...>
+    if (sub === "ch" && (args[1] ?? "").toLowerCase() === "text") {
+      const text = args.slice(2).join(" ").trim();
+      if (!text) {
+        await msg.reply("❌ Usage: `!spin ch text <text>`");
+        return;
+      }
       setGuildConfig(msg.guild.id, { messageText: text });
       await msg.reply("✅ Text updated.");
       return;
     }
 
-    if (sub === "change" && args[1] === "button" && args[2] === "text") {
-      const text = args.slice(3).join(" ");
-      if (!text) return;
+    // !spin change button text <text...>
+    if (
+      sub === "change" &&
+      (args[1] ?? "").toLowerCase() === "button" &&
+      (args[2] ?? "").toLowerCase() === "text"
+    ) {
+      const text = args.slice(3).join(" ").trim();
+      if (!text) {
+        await msg.reply("❌ Usage: `!spin change button text <text>`");
+        return;
+      }
       setGuildConfig(msg.guild.id, { buttonText: text });
       await msg.reply("✅ Button text updated.");
       return;
