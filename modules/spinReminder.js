@@ -11,7 +11,7 @@ import {
 /* ================= CONFIG STORAGE ================= */
 
 const PREFIX = "!";
-const DATA_FILE = path.resolve("./modules/spinReminder.config.json");
+const DATA_FILE = path.resolve("./data/spinReminder.config.json"); // ✅ persistent on Railway
 
 const timers = new Map();
 
