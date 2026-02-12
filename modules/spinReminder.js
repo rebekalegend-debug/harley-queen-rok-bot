@@ -8,12 +8,16 @@ import {
   PermissionFlagsBits,
 } from "discord.js";
 
-/* ================= CONFIG STORAGE ================= */
+/* ================= PERSISTENT PATH (RAILWAY) ================= */
+
+// Railway persistent volume is commonly mounted at /data
+const DATA_DIR = fs.existsSync("/data") ? "/data" : path.resolve("./data");
+const DATA_FILE = path.join(DATA_DIR, "spinReminder.config.json");
 
 const PREFIX = "!";
-const DATA_FILE = path.resolve("./data/spinReminder.config.json"); // ✅ persistent on Railway
-
 const timers = new Map();
+
+/* ================= CONFIG STORAGE ================= */
 
 function loadDB() {
   try {
@@ -24,15 +28,20 @@ function loadDB() {
 }
 
 function saveDB(db) {
-  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
+  try {
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), "utf8");
+  } catch (e) {
+    console.error("[spinReminder] ❌ Failed to save DB at:", DATA_FILE);
+    console.error("[spinReminder] ❌ Error:", e?.message ?? e);
+  }
 }
 
 function ensureDefaults(db, guildId) {
   if (!db[guildId]) {
     db[guildId] = {
       pingChannelId: null,
-      pingRoleId: null, // if null => @everyone
+      pingRoleId: null, // null => @everyone
       siteUrl: "https://store.lilith.com/rok",
       messageText: "Prize draws refreshed!🎡➡️🎁",
       buttonText: "Spin now!",
@@ -77,10 +86,7 @@ function nextFridayMidnightUTC(fromDate = new Date()) {
   let daysAhead = (targetDay - day + 7) % 7;
   let target = new Date(todayMidnightUTC.getTime() + daysAhead * 86400000);
 
-  // if it's Friday and already at/after 00:00 UTC, schedule next week
   if (daysAhead === 0 && now >= target) target = new Date(target.getTime() + 7 * 86400000);
-
-  // safety: ensure in future
   if (target <= now) target = new Date(target.getTime() + 7 * 86400000);
 
   return target;
@@ -187,8 +193,22 @@ function looksLikeUrl(s) {
 export function setupSpinReminder(client) {
   client.once("ready", () => {
     const db = loadDB();
+
+    console.log("[spinReminder] data dir:", DATA_DIR);
+    console.log("[spinReminder] data file:", DATA_FILE);
+    console.log("[spinReminder] loaded guilds:", Object.keys(db).length);
+
+    // schedule for all stored guilds
     for (const gid of Object.keys(db)) scheduleGuild(client, gid);
+
+    // ensure defaults for all currently connected guilds
+    for (const [gid] of client.guilds.cache) getGuildConfig(gid);
+
     console.log("[spinReminder] ready");
+  });
+
+  client.on("guildCreate", (guild) => {
+    getGuildConfig(guild.id);
   });
 
   client.on("messageCreate", async (msg) => {
@@ -206,7 +226,7 @@ export function setupSpinReminder(client) {
 !spin show scheduled
 !spin test
 !spin set pingchannel #channel
-!spin set pingrole @role
+!spin set pingrole @role | everyone
 !spin site set <url>
 !spin ch text <text>
 !spin change button text <text>`
@@ -248,7 +268,7 @@ export function setupSpinReminder(client) {
       return;
     }
 
-    // !spin test
+    // !spin test (admin)
     if (sub === "test") {
       if (!isAdmin(msg.member)) return;
       await sendSpinPing(client, msg.guild.id);
