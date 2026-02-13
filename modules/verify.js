@@ -510,8 +510,8 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
       // success
       verifiedDone.set(member.id, true);
 
-      // keep channel clean: delete screenshot after success (optional)
-      await message.delete().catch(() => {});
+      // ✅ keep screenshot for manual review (do NOT delete on success)
+      // await message.delete().catch(() => {});
 
       await message.channel.send(
         `✅ Verified ${member} as **${result.cleanName}** (ID: ${result.govId}). Role granted.`
