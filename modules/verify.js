@@ -1,5 +1,5 @@
 // modules/verify.js
-console.log("🔥 VERIFY MODULE BUILD 2026-02-09 FINAL");
+console.log("🔥 VERIFY MODULE BUILD 2026-02-13 IMAGE OCR + ICON CHECK");
 
 import fs from "node:fs";
 import path from "node:path";
@@ -8,17 +8,14 @@ import { fileURLToPath } from "node:url";
 
 import {
   Events,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
   PermissionFlagsBits
 } from "discord.js";
 
 import { parse } from "csv-parse/sync";
 import { getGuild, setGuild } from "./guildConfig.js";
+
+import Jimp from "jimp";
+import { createWorker } from "tesseract.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,8 +26,33 @@ const HARLEY_QUINN_USER_ID = "297057337590546434";
 // headers: Name,ID
 const DATA_FILE = path.join(__dirname, "DATA.csv");
 
-// runtime memory: userId -> screenshot done?
-const screenshotDone = new Map();
+// icon templates must be in same folder as verify.js
+const ICON_FILES = ["1.png", "2.png", "3.png"].map((f) => path.join(__dirname, f));
+
+// runtime memory: userId -> screenshot verified done?
+const verifiedDone = new Map();
+
+// ===== Keep Railway container alive (Web Service healthcheck) =====
+let httpStarted = false;
+function startHttpKeepAliveOnce() {
+  if (httpStarted) return;
+  httpStarted = true;
+
+  const PORT = process.env.PORT || 8080;
+  http
+    .createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("OK");
+    })
+    .listen(PORT, () => console.log(`🌐 HTTP server listening on ${PORT}`));
+}
+
+function isAdminPerm(member) {
+  return member?.permissions?.has?.(PermissionFlagsBits.Administrator);
+}
+function isOwner(guild, userId) {
+  return guild?.ownerId === userId;
+}
 
 // -------- helpers --------
 function sanitizeName(raw) {
@@ -53,7 +75,6 @@ function readCsvRecords() {
 function lookupNameByGovernorId(governorId) {
   const records = readCsvRecords();
   const target = String(governorId).trim();
-
   for (const row of records) {
     const id = String(row.ID ?? "").trim();
     const name = String(row.Name ?? "").trim();
@@ -62,32 +83,192 @@ function lookupNameByGovernorId(governorId) {
   return null;
 }
 
-// ===== Keep Railway container alive (Web Service healthcheck) =====
-// Safe even with many modules; but must start only once.
-let httpStarted = false;
-function startHttpKeepAliveOnce() {
-  if (httpStarted) return;
-  httpStarted = true;
-
-  const PORT = process.env.PORT || 8080;
-  http
-    .createServer((req, res) => {
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end("OK");
-    })
-    .listen(PORT, () => console.log(`🌐 HTTP server listening on ${PORT}`));
-}
-function isAdminPerm(member) {
-  return member?.permissions?.has?.(PermissionFlagsBits.Administrator);
+function isImageAttachment(att) {
+  return (
+    att?.contentType?.startsWith("image/") ||
+    /\.(png|jpg|jpeg|webp)$/i.test(att?.name || "")
+  );
 }
 
-function isOwner(guild, userId) {
-  return guild?.ownerId === userId;
+async function downloadToBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download image (${res.status})`);
+  const arr = await res.arrayBuffer();
+  return Buffer.from(arr);
 }
 
-// =====================
-// EXPORT: setupVerify(client)
-// =====================
+/* ================= OCR (tesseract.js) ================= */
+
+let ocrWorker = null;
+async function getOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  const w = await createWorker();
+  await w.loadLanguage("eng");
+  await w.initialize("eng");
+  // help OCR a bit: favor digits/letters and colon/paren
+  await w.setParameters({
+    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789():#- ",
+  });
+  ocrWorker = w;
+  console.log("✅ [VERIFY] OCR worker ready");
+  return ocrWorker;
+}
+
+function normalizeText(s) {
+  return String(s ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractGovernorIdFromText(text) {
+  const t = String(text ?? "");
+  // common patterns: "Governor (ID: 58532591)" or "(ID:58532591)" etc
+  const m = t.match(/ID\s*[:#]\s*([0-9]{6,20})/i);
+  if (m) return m[1];
+  const m2 = t.match(/\(ID\s*[:#]?\s*([0-9]{6,20})\)/i);
+  if (m2) return m2[1];
+  return null;
+}
+
+/* ================= ICON MATCH (Jimp) =================
+   We do a coarse template search on a downscaled copy to keep CPU acceptable.
+   - This is not OpenCV-level, but works well when UI is consistent.
+*/
+
+const ICON_MATCH_MAX_DIFF = 0.18; // lower = stricter (0.12..0.22 typical)
+const ICON_SCAN_STEP = 8;         // smaller = slower but more accurate
+const DOWNSCALE_WIDTH = 900;      // reduce CPU
+
+let iconTemplates = null;
+
+async function loadIconTemplatesOnce() {
+  if (iconTemplates) return iconTemplates;
+
+  const loaded = [];
+  for (const p of ICON_FILES) {
+    if (!fs.existsSync(p)) {
+      console.warn(`[VERIFY] Missing icon template: ${p}`);
+      continue;
+    }
+    const img = await Jimp.read(p);
+    loaded.push({
+      path: p,
+      img,
+      w: img.bitmap.width,
+      h: img.bitmap.height,
+    });
+  }
+
+  if (!loaded.length) {
+    console.warn("[VERIFY] No icon templates loaded (1.png/2.png/3.png). Icon check will always fail.");
+  } else {
+    console.log(`[VERIFY] Loaded ${loaded.length} icon templates.`);
+  }
+
+  iconTemplates = loaded;
+  return iconTemplates;
+}
+
+// Return true if ANY icon template is found in screenshot
+async function containsAnyIcon(fullImgJimp) {
+  const templates = await loadIconTemplatesOnce();
+  if (!templates.length) return false;
+
+  // downscale screenshot for faster scan
+  const img = fullImgJimp.clone();
+  if (img.bitmap.width > DOWNSCALE_WIDTH) img.resize(DOWNSCALE_WIDTH, Jimp.AUTO);
+
+  // also downscale templates proportionally if screenshot was downscaled
+  // We'll compute scale ratio using width.
+  const scale = img.bitmap.width / fullImgJimp.bitmap.width;
+
+  // scan each template
+  for (const t of templates) {
+    const temp = t.img.clone();
+    if (scale !== 1) temp.resize(Math.max(6, Math.round(t.w * scale)), Math.max(6, Math.round(t.h * scale)));
+
+    // skip impossible
+    if (temp.bitmap.width >= img.bitmap.width || temp.bitmap.height >= img.bitmap.height) continue;
+
+    const maxX = img.bitmap.width - temp.bitmap.width;
+    const maxY = img.bitmap.height - temp.bitmap.height;
+
+    // coarse scan
+    for (let y = 0; y <= maxY; y += ICON_SCAN_STEP) {
+      for (let x = 0; x <= maxX; x += ICON_SCAN_STEP) {
+        const crop = img.clone().crop(x, y, temp.bitmap.width, temp.bitmap.height);
+        const diff = Jimp.diff(crop, temp).percent; // 0 = identical
+        if (diff <= ICON_MATCH_MAX_DIFF) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/* ================= MAIN VERIFY PIPELINE ================= */
+
+async function analyzeAndVerifyFromScreenshot({ guild, member, channel, verifyCfg, attachment }) {
+  // download attachment
+  const buf = await downloadToBuffer(attachment.url);
+
+  // load as image
+  const img = await Jimp.read(buf);
+
+  // OCR full image (simple and robust; slower but ok for single upload)
+  const worker = await getOcrWorker();
+  const { data } = await worker.recognize(buf);
+  const ocrText = normalizeText(data?.text ?? "");
+
+  // detect type:
+  // if contains "GOVERNOR PROFILE" => mobile-type requiring icon check (per your instruction)
+  const isMobileType = /GOVERNOR\s+PROFILE/i.test(ocrText);
+
+  // if mobile type, enforce icon presence (any of 1.png/2.png/3.png)
+  if (isMobileType) {
+    const ok = await containsAnyIcon(img);
+    if (!ok) {
+      return { ok: false, reason: "MISSING_ICONS" };
+    }
+  }
+
+  // extract ID
+  const govId = extractGovernorIdFromText(ocrText);
+  if (!govId) return { ok: false, reason: "NO_ID" };
+
+  // lookup name
+  let nameFromDb = null;
+  try {
+    nameFromDb = lookupNameByGovernorId(govId);
+  } catch (err) {
+    console.error("CSV error:", err);
+    return { ok: false, reason: "CSV_ERROR" };
+  }
+  if (!nameFromDb) return { ok: false, reason: "ID_NOT_FOUND", govId };
+
+  const cleanName = sanitizeName(nameFromDb);
+  if (!cleanName) return { ok: false, reason: "BAD_NAME" };
+
+  // permission check
+  const me = await guild.members.fetchMe();
+  if (
+    !me.permissions.has(PermissionFlagsBits.ManageNicknames) ||
+    !me.permissions.has(PermissionFlagsBits.ManageRoles)
+  ) {
+    return { ok: false, reason: "BOT_MISSING_PERMS" };
+  }
+
+  // apply
+  await member.setNickname(cleanName).catch(() => {});
+  await member.roles.add(verifyCfg.roleId).catch(() => {});
+
+  return { ok: true, govId, cleanName, isMobileType };
+}
+
+/* ===================== EXPORT: setupVerify(client) ===================== */
+
 export function setupVerify(client) {
   startHttpKeepAliveOnce();
 
@@ -95,9 +276,7 @@ export function setupVerify(client) {
     console.log(`✅ [VERIFY] Logged in as ${client.user.tag}`);
   });
 
-  // =====================
   // MEMBER JOIN
-  // =====================
   client.on(Events.GuildMemberAdd, async (member) => {
     const cfg = getGuild(member.guild.id).verify;
     if (!cfg?.channelId) return;
@@ -105,7 +284,7 @@ export function setupVerify(client) {
     const channel = await member.guild.channels.fetch(cfg.channelId).catch(() => null);
     if (!channel) return;
 
-    screenshotDone.delete(member.id);
+    verifiedDone.delete(member.id);
 
     await channel.send(
 `Welcome ${member}💗!
@@ -115,13 +294,11 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
     );
   });
 
-  // =====================
   // MESSAGE CREATE
-  // =====================
   client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
 
-    // ---------- DM AUTO REPLY ----------
+    // DM auto reply
     if (!message.guild) {
       if (message.author.id === HARLEY_QUINN_USER_ID) return;
       return message.reply(
@@ -132,14 +309,15 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
     const guildId = message.guild.id;
     const verifyCfg = getGuild(guildId).verify || {};
 
-    // ---------- VERIFY COMMANDS ----------
+    // VERIFY ADMIN COMMANDS
     if (message.content.startsWith("!verify")) {
       const args = message.content.split(/\s+/);
       const sub = (args[1] || "help").toLowerCase();
-    // 🔒 LOCK VERIFY COMMANDS: Owner or Administrator only
-    if (!isOwner(message.guild, message.author.id) && !isAdminPerm(message.member)) {
-      return message.reply("❌ You don’t have permission to use verify admin commands.");
-    }
+
+      // Owner or Administrator only
+      if (!isOwner(message.guild, message.author.id) && !isAdminPerm(message.member)) {
+        return message.reply("❌ You don’t have permission to use verify admin commands.");
+      }
 
       if (sub === "help") {
         return message.reply(
@@ -175,7 +353,6 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
         if (args[2] === "channel") {
           const ch = message.mentions.channels.first();
           if (!ch) return message.reply("❌ Use: `!verify set channel #channel`");
-
           setGuild(guildId, { verify: { channelId: ch.id } });
           return message.reply(`✅ Verify channel set to ${ch}`);
         }
@@ -183,7 +360,6 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
         if (args[2] === "role") {
           const role = message.mentions.roles.first();
           if (!role) return message.reply("❌ Use: `!verify set role @role`");
-
           setGuild(guildId, { verify: { roleId: role.id } });
           return message.reply(`✅ Verify role set to ${role.name}`);
         }
@@ -192,152 +368,94 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
       return message.reply("❌ Unknown command. Use `!verify help`");
     }
 
-    // ---------- VERIFY CHANNEL LOGIC ----------
+    // VERIFY CHANNEL ONLY
     if (!verifyCfg.channelId || message.channel.id !== verifyCfg.channelId) return;
 
     const member = await message.guild.members.fetch(message.author.id).catch(() => null);
     if (!member) return message.delete().catch(() => {});
 
-    // If already verified, delete anything they post in verify channel
+    // already verified -> delete anything they post
     if (verifyCfg.roleId && member.roles.cache.has(verifyCfg.roleId)) {
       return message.delete().catch(() => {});
     }
 
-    // Allow only ONE image screenshot from the user; delete everything else
-    const hasImage = message.attachments.some(att =>
-      att.contentType?.startsWith("image/") ||
-      /\.(png|jpg|jpeg|webp|gif)$/i.test(att.name || "")
-    );
-
-    if (!hasImage || screenshotDone.get(member.id)) {
+    // allow only image; delete other content
+    const imgAtt = message.attachments.find(isImageAttachment);
+    if (!imgAtt) {
       return message.delete().catch(() => {});
     }
 
-    screenshotDone.set(member.id, true);
+    // if we already verified them, block further posts
+    if (verifiedDone.get(member.id)) {
+      return message.delete().catch(() => {});
+    }
 
-    const button = new ButtonBuilder()
-      .setCustomId(`verify_id:${member.id}`)
-      .setLabel("Enter Governor ID")
-      .setStyle(ButtonStyle.Primary);
-
-    const row = new ActionRowBuilder().addComponents(button);
-
-    await message.reply({
-      content: "Great! Enter your **Governor ID** (numbers only)(Ex:012345678)🆔👉🔢.",
-      components: [row]
-    });
-  });
-
-  // =====================
-  // INTERACTIONS
-  // =====================
-  client.on(Events.InteractionCreate, async (interaction) => {
+    // run verification from screenshot
     try {
-      if (!interaction.guild) return;
+      // basic guard: must be configured
+      if (!verifyCfg.roleId) {
+        await message.reply("❌ Verify role not configured. Admin: `!verify set role @role`");
+        return;
+      }
 
-      const verifyCfg = getGuild(interaction.guild.id).verify || {};
+      const result = await analyzeAndVerifyFromScreenshot({
+        guild: message.guild,
+        member,
+        channel: message.channel,
+        verifyCfg,
+        attachment: imgAtt
+      });
 
-      // ---------- BUTTON ----------
-      if (interaction.isButton()) {
-        const [key, uid] = interaction.customId.split(":");
-        if (key !== "verify_id" || interaction.user.id !== uid) {
-          return interaction.reply({ content: "You trying to steal! This button isn’t for you.😂", ephemeral: true });
-        }
-
-        const modal = new ModalBuilder()
-          .setCustomId(`id_modal:${uid}`)
-          .setTitle("Rise of Kingdoms Verification")
-          .addComponents(
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId("governor_id")
-                .setLabel("Your RoK Governor ID (numbers only)")
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true)
-                .setMinLength(6)
-                .setMaxLength(20)
-            )
+      if (!result.ok) {
+        // delete the image to keep channel clean, then tell user what to do
+        await message.delete().catch(() => {});
+        if (result.reason === "MISSING_ICONS") {
+          await message.channel.send(
+            `${member} ❌ Wrong screenshot.\n` +
+            `For **mobile-type** screenshots (GOVERNOR PROFILE), the image must include the required UI icons.\n` +
+            `Please upload the correct RoK profile screen again.`
           );
-
-        return interaction.showModal(modal);
+          return;
+        }
+        if (result.reason === "NO_ID") {
+          await message.channel.send(
+            `${member} ❌ I couldn’t read your **Governor ID**.\n` +
+            `Upload a clearer screenshot (no crop, full profile screen).`
+          );
+          return;
+        }
+        if (result.reason === "ID_NOT_FOUND") {
+          await message.channel.send(
+            `${member} ❌ Your ID (**${result.govId}**) is not in our database.\n` +
+            `Contact an officer.`
+          );
+          return;
+        }
+        if (result.reason === "CSV_ERROR") {
+          await message.channel.send(`${member} ❌ Database error. Contact an admin.`);
+          return;
+        }
+        if (result.reason === "BOT_MISSING_PERMS") {
+          await message.channel.send(`${member} ❌ Bot missing permissions (Manage Nicknames / Manage Roles).`);
+          return;
+        }
+        await message.channel.send(`${member} ❌ Verification failed. Upload again.`);
+        return;
       }
 
-      // ---------- MODAL SUBMIT ----------
-      if (interaction.isModalSubmit()) {
-        const [key, uid] = interaction.customId.split(":");
-        if (key !== "id_modal" || interaction.user.id !== uid) {
-          return interaction.reply({ content: "This form isn’t for you.", ephemeral: true });
-        }
+      // success
+      verifiedDone.set(member.id, true);
 
-        if (!verifyCfg.roleId || !verifyCfg.channelId) {
-          return interaction.reply({
-            content: "❌ Verify is not configured. Admin must set channel + role with `!verify set ...`",
-            ephemeral: true
-          });
-        }
+      // keep channel clean: delete screenshot after success (optional)
+      await message.delete().catch(() => {});
 
-        const member = interaction.member;
-        const rawId = interaction.fields.getTextInputValue("governor_id").trim();
-
-        if (!/^\d+$/.test(rawId)) {
-          return interaction.reply({
-            content: "❌ **Governor ID** must contain numbers only👉🔢🆔, Ex:012345678.",
-            ephemeral: true
-          });
-        }
-
-        let nameFromDb = null;
-        try {
-          nameFromDb = lookupNameByGovernorId(rawId);
-        } catch (err) {
-          console.error("CSV error:", err);
-          return interaction.reply({
-            content: "❌ Database error reading DATA.csv. Ask an admin.",
-            ephemeral: true
-          });
-        }
-
-        if (!nameFromDb) {
-          return interaction.reply({
-            content: "❌ ID not found in database.",
-            ephemeral: true
-          });
-        }
-
-        const cleanName = sanitizeName(nameFromDb);
-        if (!cleanName) {
-          return interaction.reply({
-            content: "❌ Name in database is not valid for Discord nickname.",
-            ephemeral: true
-          });
-        }
-
-        const me = await interaction.guild.members.fetchMe();
-        if (
-          !me.permissions.has(PermissionFlagsBits.ManageNicknames) ||
-          !me.permissions.has(PermissionFlagsBits.ManageRoles)
-        ) {
-          return interaction.reply({ content: "❌ Bot missing permissions.", ephemeral: true });
-        }
-
-        await member.setNickname(cleanName);
-        await member.roles.add(verifyCfg.roleId);
-
-        if (interaction.message) {
-          await interaction.message.edit({
-            content: `✅ All set, ${interaction.user}! Enjoy the server.`,
-            components: []
-          }).catch(() => {});
-        }
-
-        return interaction.reply({
-          content: `✅ Verified as **${cleanName}** (ID: ${rawId}). Role granted.`,
-          ephemeral: true
-        });
-      }
+      await message.channel.send(
+        `✅ Verified ${member} as **${result.cleanName}** (ID: ${result.govId}). Role granted.`
+      );
     } catch (e) {
-      console.error(e);
+      console.error("[VERIFY] screenshot verify error:", e?.message ?? e);
+      await message.delete().catch(() => {});
+      await message.channel.send(`${member} ❌ Something went wrong reading your screenshot. Try again.`);
     }
   });
 }
-
