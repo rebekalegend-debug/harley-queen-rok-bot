@@ -9,6 +9,7 @@ import { setupRuinsPinger } from "./modules/ruinsPinger.js";
 import { setupAooMge } from "./modules/aoomge.js";
 import { setupAooMgeReminder } from "./modules/aoo-mge-reminder.js";
 import { setupSpinReminder } from "./modules/spinReminder.js";
+import { setupEventReminder } from "./modules/eventReminder.js";
 
 // create ONE client
 const client = new Client({
@@ -29,6 +30,7 @@ setupRuinsPinger(client);
 setupAooMge(client);
 setupAooMgeReminder(client);
 setupSpinReminder(client);
+setupEventReminder(client);
 
 // ✅ set bot custom status (ONE place)
 client.once("ready", () => {
