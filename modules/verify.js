@@ -87,10 +87,23 @@ function lookupNameByGovernorId(governorId) {
 }
 
 function isImageAttachment(att) {
-  return (
-    att?.contentType?.startsWith("image/") ||
-    /\.(png|jpg|jpeg|webp)$/i.test(att?.name || "")
-  );
+  if (!att) return false;
+
+  // contentType (best case)
+  if (att.contentType?.startsWith("image/")) return true;
+
+  const name = (att.name || "").toLowerCase();
+  const url = (att.url || "").toLowerCase();
+
+  // filename extension
+  if (/\.(png|jpg|jpeg|webp)$/.test(name)) return true;
+
+  // CDN url fallback (Discord sometimes strips filename)
+  if (url.includes(".webp") || url.includes(".png") || url.includes(".jpg") || url.includes(".jpeg")) {
+    return true;
+  }
+
+  return false;
 }
 
 async function downloadToBuffer(url) {
