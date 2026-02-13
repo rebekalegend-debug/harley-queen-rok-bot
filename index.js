@@ -10,6 +10,7 @@ import { setupAooMge } from "./modules/aoomge.js";
 import { setupAooMgeReminder } from "./modules/aoo-mge-reminder.js";
 import { setupSpinReminder } from "./modules/spinReminder.js";
 import { setupEventReminder } from "./modules/eventReminder.js";
+import { setupPsCalendarPinger } from "./modules/psCalendarPinger.js";
 
 // create ONE client
 const client = new Client({
@@ -31,6 +32,7 @@ setupAooMge(client);
 setupAooMgeReminder(client);
 setupSpinReminder(client);
 setupEventReminder(client);
+setupPsCalendarPinger(client);
 
 // ✅ set bot custom status (ONE place)
 client.once("ready", () => {
