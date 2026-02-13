@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
+import sharp from "sharp"; // put at top with other imports
 
 import {
   Events,
@@ -269,7 +270,7 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, channel, verifyCf
   const buf = await downloadToBuffer(attachment.url);
 
   // load as image
- import sharp from "sharp"; // put at top with other imports
+ 
 
 async function loadImageForJimp(buffer) {
   try {
