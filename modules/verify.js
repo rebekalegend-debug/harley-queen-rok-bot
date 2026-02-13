@@ -29,6 +29,9 @@ const DATA_FILE = path.join(__dirname, "DATA.csv");
 // icon templates must be in same folder as verify.js
 const ICON_FILES = ["1.png", "2.png", "3.png"].map((f) => path.join(__dirname, f));
 
+// runtime memory: userId -> locked until rejoin?
+const lockedUntilRejoin = new Map();
+
 // runtime memory: userId -> screenshot verified done?
 const verifiedDone = new Map();
 
@@ -341,7 +344,7 @@ export function setupVerify(client) {
     if (!channel) return;
 
     verifiedDone.delete(member.id);
-
+    lockedUntilRejoin.delete(member.id);
     await channel.send(
 `Welcome ${member}💗!
 
@@ -440,6 +443,10 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
     if (!imgAtt) {
       return message.delete().catch(() => {});
     }
+    // If locked (ID not in DB), do not allow more uploads until they rejoin
+    if (lockedUntilRejoin.get(member.id)) {
+    return message.delete().catch(() => {});
+    }
 
     // if we already verified them, block further posts
     if (verifiedDone.get(member.id)) {
@@ -480,13 +487,14 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
           );
           return;
         }
-        if (result.reason === "ID_NOT_FOUND") {
-          await message.channel.send(
-            `${member} ❌ Your ID (**${result.govId}**) is not in our database.\n` +
-            `Contact an officer.`
-          );
-          return;
-        }
+    if (result.reason === "ID_NOT_FOUND") {
+  await message.channel.send(
+    `${member} ❌ Your ID (**${result.govId}**) is not in our database.\nContact Harley Queen.`
+  );
+  return;
+}
+
+
         if (result.reason === "CSV_ERROR") {
           await message.channel.send(`${member} ❌ Database error. Contact an admin.`);
           return;
