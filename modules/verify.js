@@ -97,6 +97,52 @@ async function downloadToBuffer(url) {
   return Buffer.from(arr);
 }
 
+async function ocrBuffer(worker, buffer) {
+  const { data } = await worker.recognize(buffer);
+  return String(data?.text ?? "").replace(/\s+/g, " ").trim();
+}
+
+async function preprocessForOcr(jimpImg) {
+  // boost text readability
+  const img = jimpImg.clone();
+
+  // upscale small crops (very important for "ID:" text)
+  const minW = 900;
+  if (img.bitmap.width < minW) img.resize(minW, Jimp.AUTO);
+
+  img
+    .grayscale()
+    .contrast(0.6)
+    .normalize()
+    .posterize(6); // reduces noise but keeps text edges
+
+  // light threshold-ish effect (Jimp doesn't have hard threshold built-in)
+  // simulate by lowering color depth (posterize already helps)
+
+  const buf = await img.getBufferAsync(Jimp.MIME_PNG);
+  return buf;
+}
+
+function cropByPercent(img, x1, y1, x2, y2) {
+  const w = img.bitmap.width;
+  const h = img.bitmap.height;
+
+  const x = Math.max(0, Math.floor(w * x1));
+  const y = Math.max(0, Math.floor(h * y1));
+  const cw = Math.max(1, Math.floor(w * (x2 - x1)));
+  const ch = Math.max(1, Math.floor(h * (y2 - y1)));
+
+  return img.clone().crop(x, y, Math.min(cw, w - x), Math.min(ch, h - y));
+}
+
+function extractGovernorIdFromText(text) {
+  const t = String(text ?? "");
+  const m = t.match(/ID\s*[:#]\s*([0-9]{6,20})/i);
+  return m ? m[1] : null;
+}
+
+
+
 /* ================= OCR (tesseract.js) ================= */
 
 let ocrWorker = null;
@@ -217,25 +263,43 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, channel, verifyCf
   // load as image
   const img = await Jimp.read(buf);
 
-  // OCR full image (simple and robust; slower but ok for single upload)
-  const worker = await getOcrWorker();
-  const { data } = await worker.recognize(buf);
-  const ocrText = normalizeText(data?.text ?? "");
+ const worker = await getOcrWorker();
 
-  // detect type:
-  // if contains "GOVERNOR PROFILE" => mobile-type requiring icon check (per your instruction)
-  const isMobileType = /GOVERNOR\s+PROFILE/i.test(ocrText);
+// 1) Detect "GOVERNOR PROFILE" ONLY from the top strip (faster + accurate)
+const topStrip = cropByPercent(img, 0.20, 0.00, 0.95, 0.18);
+const topBuf = await preprocessForOcr(topStrip);
+const topText = await ocrBuffer(worker, topBuf);
+const isMobileType = /GOVERNOR\s+PROFILE/i.test(topText);
 
-  // if mobile type, enforce icon presence (any of 1.png/2.png/3.png)
-  if (isMobileType) {
-    const ok = await containsAnyIcon(img);
-    if (!ok) {
-      return { ok: false, reason: "MISSING_ICONS" };
-    }
+// 2) Try extracting ID from multiple likely regions (PC + Mobile variations)
+const candidateCrops = [
+  // PC popup: upper left blue panel header area
+  cropByPercent(img, 0.28, 0.12, 0.75, 0.28),
+
+  // PC popup: slightly more right (some layouts place ID further right)
+  cropByPercent(img, 0.45, 0.10, 0.95, 0.30),
+
+  // Mobile sidebar: top-right of the blue sidebar panel
+  cropByPercent(img, 0.05, 0.20, 0.45, 0.40),
+
+  // Mobile sidebar: even tighter top-right (ID is often at far right)
+  cropByPercent(img, 0.25, 0.20, 0.50, 0.35),
+];
+
+let govId = null;
+for (const c of candidateCrops) {
+  const cBuf = await preprocessForOcr(c);
+  const txt = await ocrBuffer(worker, cBuf);
+  const id = extractGovernorIdFromText(txt);
+  if (id) {
+    govId = id;
+    break;
   }
+}
 
-  // extract ID
-  const govId = extractGovernorIdFromText(ocrText);
+if (!govId) return { ok: false, reason: "NO_ID" };
+
+
   if (!govId) return { ok: false, reason: "NO_ID" };
 
   // lookup name
