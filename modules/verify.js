@@ -1,5 +1,5 @@
 // modules/verify.js
-console.log("🔥 VERIFY MODULE BUILD 2026-02-13 FINAL (OCR + ICON + WEBP + 3-REJECT LOCK)");
+console.log("🔥 VERIFY MODULE BUILD 2026-02-13 FINAL (OCR FIRST -> ICON CHECK -> WEBP -> 3-REJECT LOCK)");
 
 import fs from "node:fs";
 import path from "node:path";
@@ -61,7 +61,7 @@ function isOwner(guild, userId) {
 
 async function loadImageForJimp(buffer) {
   try {
-    return await Jimp.read(buffer); // png/jpg sometimes webp on some builds
+    return await Jimp.read(buffer);
   } catch {
     // webp -> png
     const pngBuffer = await sharp(buffer).png().toBuffer();
@@ -188,8 +188,7 @@ async function loadIconTemplatesOnce() {
       console.warn(`[VERIFY] Missing icon template: ${p}`);
       continue;
     }
-    // templates are PNG; read from disk
-    const img = await Jimp.read(p);
+    const img = await Jimp.read(p); // templates are PNG
     loaded.push({ path: p, img, w: img.bitmap.width, h: img.bitmap.height });
   }
 
@@ -230,7 +229,9 @@ async function containsAnyIcon(fullImgJimp) {
   return false;
 }
 
-/* ================= MAIN VERIFY PIPELINE ================= */
+/* ================= MAIN VERIFY PIPELINE =================
+   IMPORTANT: OCR FIRST, THEN ICON CHECK
+*/
 
 async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attachment }) {
   const buf = await downloadToBuffer(attachment.url);
@@ -238,13 +239,9 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attach
   // load screenshot (supports webp)
   const img = await loadImageForJimp(buf);
 
-  // ALWAYS require at least one of 1/2/3 icons
-  const iconOk = await containsAnyIcon(img);
-  if (!iconOk) return { ok: false, reason: "MISSING_ICONS" };
-
   const worker = await getOcrWorker();
 
-  // OCR only likely regions (fast + accurate)
+  // 1) OCR for ID first (avoid wasting time scanning icons if screenshot is unclear/random)
   const candidateCrops = [
     // PC-ish regions
     cropByPercent(img, 0.28, 0.12, 0.75, 0.28),
@@ -267,6 +264,11 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attach
 
   if (!govId) return { ok: false, reason: "NO_ID" };
 
+  // 2) Icon check second (prove it's the correct “owner profile” screenshot)
+  const iconOk = await containsAnyIcon(img);
+  if (!iconOk) return { ok: false, reason: "MISSING_ICONS", govId };
+
+  // 3) Database lookup
   let nameFromDb = null;
   try {
     nameFromDb = lookupNameByGovernorId(govId);
@@ -280,11 +282,13 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attach
   const cleanName = sanitizeName(nameFromDb);
   if (!cleanName) return { ok: false, reason: "BAD_NAME" };
 
+  // perms
   const me = await guild.members.fetchMe();
   if (!me.permissions.has(PermissionFlagsBits.ManageNicknames) || !me.permissions.has(PermissionFlagsBits.ManageRoles)) {
     return { ok: false, reason: "BOT_MISSING_PERMS" };
   }
 
+  // apply
   await member.setNickname(cleanName).catch(() => {});
   await member.roles.add(verifyCfg.roleId).catch(() => {});
 
@@ -342,7 +346,6 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
       const args = message.content.split(/\s+/);
       const sub = (args[1] || "help").toLowerCase();
 
-      // Owner or Administrator only
       if (!isOwner(message.guild, message.author.id) && !isAdminPerm(message.member)) {
         return message.reply("❌ You don’t have permission to use verify admin commands.");
       }
@@ -435,24 +438,6 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
         // delete failed screenshots
         await message.delete().catch(() => {});
 
-        if (result.reason === "MISSING_ICONS") {
-          const n = addReject(member.id);
-          if (n >= 3) {
-            lockedContactAdmin.set(member.id, true);
-            await message.channel.send(
-              `${member} ❌ Screenshot rejected **3 times**.\n` +
-              `Stop uploading. Please **contact an admin/officer** for manual verification.`
-            );
-            return;
-          }
-          await message.channel.send(
-            `${member} ❌ Wrong screenshot.\n` +
-            `Your image must show the required UI icons. Upload again.\n` +
-            `Attempts: **${n}/3**`
-          );
-          return;
-        }
-
         if (result.reason === "NO_ID") {
           const n = addReject(member.id);
           if (n >= 3) {
@@ -465,7 +450,25 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
           }
           await message.channel.send(
             `${member} ❌ I couldn’t read your **Governor ID**.\n` +
-            `Upload a clearer full profile screenshot.\n` +
+            `Upload a clearer full profile screenshot (no crop).\n` +
+            `Attempts: **${n}/3**`
+          );
+          return;
+        }
+
+        if (result.reason === "MISSING_ICONS") {
+          const n = addReject(member.id);
+          if (n >= 3) {
+            lockedContactAdmin.set(member.id, true);
+            await message.channel.send(
+              `${member} ❌ Screenshot rejected **3 times**.\n` +
+              `Stop uploading. Please **contact an admin/officer** for manual verification.`
+            );
+            return;
+          }
+          await message.channel.send(
+            `${member} ❌ ID read OK (**${result.govId}**), but your screenshot is missing the required UI icons.\n` +
+            `Upload the correct profile screen again.\n` +
             `Attempts: **${n}/3**`
           );
           return;
