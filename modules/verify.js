@@ -467,8 +467,10 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
             return;
           }
           await message.channel.send(
-            `${member} ❌ ID read OK (**${result.govId}**), but your screenshot is missing the required UI icons.\n` +
-            `Upload the correct profile screen again.\n` +
+            `${member} ❌ This screenshot does **not** look like it was taken from **your own in-game profile screen**.\n` +
+            `⚠️ It may be a **cropped / edited / forwarded** image or an attempt to **impersonate or bypass** the verification.\n\n` +
+            `✅ Please open **your RoK profile**, take a **fresh full screenshot yourself** (no crop), and upload it again.\n` +
+            `If you believe this is a mistake, **contact an admin**.\n` +
             `Attempts: **${n}/3**`
           );
           return;
