@@ -204,7 +204,7 @@ async function loadIconTemplatesOnce() {
       console.warn(`[VERIFY] Missing icon template: ${p}`);
       continue;
     }
-    const img = await Jimp.read(p);
+    const img = await loadImageForJimp(buf);
     loaded.push({
       path: p,
       img,
@@ -269,7 +269,18 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, channel, verifyCf
   const buf = await downloadToBuffer(attachment.url);
 
   // load as image
-  const img = await Jimp.read(buf);
+ import sharp from "sharp"; // put at top with other imports
+
+async function loadImageForJimp(buffer) {
+  try {
+    return await Jimp.read(buffer); // works for png/jpg
+  } catch {
+    // convert webp → png
+    const pngBuffer = await sharp(buffer).png().toBuffer();
+    return await Jimp.read(pngBuffer);
+  }
+}
+
 
  const worker = await getOcrWorker();
 
