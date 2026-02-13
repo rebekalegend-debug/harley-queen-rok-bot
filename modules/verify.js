@@ -59,6 +59,18 @@ function isOwner(guild, userId) {
 }
 
 // -------- helpers --------
+
+async function loadImageForJimp(buffer) {
+  try {
+    return await Jimp.read(buffer); // png/jpg
+  } catch {
+    const pngBuffer = await sharp(buffer).png().toBuffer(); // webp -> png
+    return await Jimp.read(pngBuffer);
+  }
+}
+
+
+
 function sanitizeName(raw) {
   const name = String(raw ?? "").trim();
   if (name.length < 2 || name.length > 32) return null;
@@ -269,21 +281,10 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, channel, verifyCf
   // download attachment
   const buf = await downloadToBuffer(attachment.url);
 
-  // load as image
- 
+  // ✅ load image (supports webp)
+  const img = await loadImageForJimp(buf);
 
-async function loadImageForJimp(buffer) {
-  try {
-    return await Jimp.read(buffer); // works for png/jpg
-  } catch {
-    // convert webp → png
-    const pngBuffer = await sharp(buffer).png().toBuffer();
-    return await Jimp.read(pngBuffer);
-  }
-}
-
-
- const worker = await getOcrWorker();
+  const worker = await getOcrWorker();
 
 // 1) Detect "GOVERNOR PROFILE" ONLY from the top strip (faster + accurate)
 const topStrip = cropByPercent(img, 0.20, 0.00, 0.95, 0.18);
