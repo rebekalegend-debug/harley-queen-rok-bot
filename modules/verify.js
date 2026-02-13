@@ -166,15 +166,7 @@ function normalizeText(s) {
     .trim();
 }
 
-function extractGovernorIdFromText(text) {
-  const t = String(text ?? "");
-  // common patterns: "Governor (ID: 58532591)" or "(ID:58532591)" etc
-  const m = t.match(/ID\s*[:#]\s*([0-9]{6,20})/i);
-  if (m) return m[1];
-  const m2 = t.match(/\(ID\s*[:#]?\s*([0-9]{6,20})\)/i);
-  if (m2) return m2[1];
-  return null;
-}
+
 
 /* ================= ICON MATCH (Jimp) =================
    We do a coarse template search on a downscaled copy to keep CPU acceptable.
