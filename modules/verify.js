@@ -508,8 +508,8 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
         }
         if (result.reason === "NO_ID") {
           await message.channel.send(
-            `${member} ❌ I couldn’t read your **Governor ID**.\n` +
-            `Upload a clearer screenshot (no crop, full profile screen).`
+            `${member} ❌ I couldn’t read your **Governor ID**.🔁\n` +
+            `**Upload a clearer screenshot** (**no crop, full profile screen**).`
           );
           return;
         }
