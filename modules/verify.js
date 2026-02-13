@@ -515,7 +515,7 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
         }
     if (result.reason === "ID_NOT_FOUND") {
   await message.channel.send(
-    `${member} ❌ Your ID (**${result.govId}**) is not in our database.\nContact Harley Queen.`
+    `${member} ❌ Your ID (**${result.govId}**) is not in our database.\nContact an admin!.`
   );
   return;
 }
