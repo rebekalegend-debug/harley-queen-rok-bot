@@ -5,7 +5,6 @@ import crypto from "crypto";
 import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
-  PermissionFlagsBits,
 } from "discord.js";
 
 /* ================= PERSISTENT PATH (RAILWAY) ================= */
@@ -16,7 +15,7 @@ const DATA_FILE = path.join(DATA_DIR, "eventReminder.config.json");
 const PREFIX = "!";
 const WIZARD_TTL_MS = 10 * 60 * 1000; // 10 min to finish wizard
 
-// guildId -> { reminderId -> { t60, t10 } }
+// guildId -> Map(reminderId -> { t60, t10 })
 const timers = new Map();
 // wizardKey = `${guildId}:${userId}` -> session
 const wizards = new Map();
@@ -48,12 +47,7 @@ function ensureGuild(db, guildId) {
     adminRoleId: null, // role that can manage module (besides owner)
     ch1Text: "{event} in 1 hour!",
     ch10Text: "{event} in 10 min! Be ready!",
-    events: [
-      "Silk road",
-      "Shadow Legion",
-      "Alliance Mobilization",
-      "Karuak Boss",
-    ],
+    events: ["Silk road", "Shadow Legion", "Alliance Mobilization", "Karuak Boss"],
     reminders: [], // { id, eventName, timeUtcIso, createdBy, createdAtIso }
   };
 }
@@ -87,26 +81,34 @@ function removeReminder(guildId, reminderId) {
   saveDB(db);
 }
 
-/* ================= PERMS ================= */
-
-function isGuildOwner(msg) {
-  return msg.guild?.ownerId && msg.author?.id === msg.guild.ownerId;
+function deleteEventName(guildId, name) {
+  const db = loadDB();
+  ensureGuild(db, guildId);
+  db[guildId].events = (db[guildId].events ?? []).filter((e) => e !== name);
+  saveDB(db);
 }
 
-function hasAdminAccess(msg) {
-  const cfg = getGuildConfig(msg.guild.id);
-  if (isGuildOwner(msg)) return true;
+/* ================= PERMS ================= */
+
+function isGuildOwner(msgLike) {
+  return msgLike.guild?.ownerId && msgLike.author?.id === msgLike.guild.ownerId;
+}
+
+function hasAdminAccess(msgLike) {
+  const cfg = getGuildConfig(msgLike.guild.id);
+  if (isGuildOwner(msgLike)) return true;
   if (!cfg.adminRoleId) return false;
-  return msg.member?.roles?.cache?.has(cfg.adminRoleId) ?? false;
+  return msgLike.member?.roles?.cache?.has(cfg.adminRoleId) ?? false;
 }
 
 /* ================= TIME HELPERS (UTC) ================= */
 
-// Build YYYY-MM-DD list: today + 13 days
 function getNext14DatesUTC() {
   const out = [];
   const now = new Date();
-  const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const base = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)
+  );
   for (let i = 0; i < 14; i++) {
     const d = new Date(base.getTime() + i * 86400000);
     const y = d.getUTCFullYear();
@@ -118,7 +120,6 @@ function getNext14DatesUTC() {
 }
 
 function buildUtcIso(dateYYYYMMDD, hour00to23) {
-  // date at HH:00:00 UTC
   return `${dateYYYYMMDD}T${String(hour00to23).padStart(2, "0")}:00:00.000Z`;
 }
 
@@ -145,10 +146,11 @@ async function sendReminderPing(client, guildId, reminder, which) {
   if (!channel?.isTextBased()) return;
 
   const mention = `<@&${cfg.pingRoleId}>`;
+  const boldEvent = `**${reminder.eventName}**`; // ✅ event name bold
   const text =
     which === "60"
-      ? renderTemplate(cfg.ch1Text, reminder.eventName)
-      : renderTemplate(cfg.ch10Text, reminder.eventName);
+      ? renderTemplate(cfg.ch1Text, boldEvent)
+      : renderTemplate(cfg.ch10Text, boldEvent);
 
   await channel.send({
     content: `${mention} ${text}`,
@@ -167,7 +169,6 @@ function clearReminderTimers(guildId, reminderId) {
 }
 
 function scheduleReminder(client, guildId, reminder) {
-  // clear any existing timers for this reminder
   if (!timers.has(guildId)) timers.set(guildId, new Map());
   clearReminderTimers(guildId, reminder.id);
 
@@ -175,16 +176,13 @@ function scheduleReminder(client, guildId, reminder) {
   if (Number.isNaN(eventTime.getTime())) return;
 
   const now = Date.now();
-
   const t60At = eventTime.getTime() - 60 * 60 * 1000;
   const t10At = eventTime.getTime() - 10 * 60 * 1000;
 
   const g = timers.get(guildId);
-
   const entry = { t60: null, t10: null };
   g.set(reminder.id, entry);
 
-  // schedule 60m ping if in future
   if (t60At > now) {
     entry.t60 = setTimeout(async () => {
       try {
@@ -195,7 +193,6 @@ function scheduleReminder(client, guildId, reminder) {
     }, t60At - now);
   }
 
-  // schedule 10m ping if in future
   if (t10At > now) {
     entry.t10 = setTimeout(async () => {
       try {
@@ -203,13 +200,13 @@ function scheduleReminder(client, guildId, reminder) {
       } catch (e) {
         console.error("[eventReminder] 10m ping failed:", e?.message ?? e);
       } finally {
-        // delete after 10m ping
+        // delete reminder after 10-min ping
         removeReminder(guildId, reminder.id);
         clearReminderTimers(guildId, reminder.id);
       }
     }, t10At - now);
   } else {
-    // if 10m already passed, delete immediately
+    // 10-min already passed -> delete
     removeReminder(guildId, reminder.id);
     clearReminderTimers(guildId, reminder.id);
   }
@@ -286,7 +283,7 @@ function makeHourMenu(guildId, userId) {
 }
 
 function makeEventMenu(guildId, userId, events) {
-  const safe = (events ?? []).slice(0, 25); // discord max options 25
+  const safe = (events ?? []).slice(0, 25);
   const options = safe.map((name) => ({ label: name, value: name }));
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
@@ -296,7 +293,30 @@ function makeEventMenu(guildId, userId, events) {
   );
 }
 
-/* ================= COMMANDS ================= */
+function makeDeleteReminderMenu(guildId, userId, reminders) {
+  const sorted = [...(reminders ?? [])].sort(
+    (a, b) => new Date(a.timeUtcIso) - new Date(b.timeUtcIso)
+  );
+
+  const options = sorted.slice(0, 25).map((r) => {
+    const t = toUnixSeconds(new Date(r.timeUtcIso));
+    const label = `${r.eventName} — ${new Date(r.timeUtcIso).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+    return {
+      label: label.slice(0, 100),
+      description: `Event time: ${t}`,
+      value: r.id,
+    };
+  });
+
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`eventdel:reminder:${guildId}:${userId}`)
+      .setPlaceholder("Select reminder to delete")
+      .addOptions(options.length ? options : [{ label: "No reminders", value: "none" }])
+  );
+}
+
+/* ================= COMMAND PARSERS ================= */
 
 function parseChannelId(token) {
   if (!token) return null;
@@ -323,97 +343,136 @@ export function setupEventReminder(client) {
     console.log("[eventReminder] ready");
   });
 
-  // Handle dropdown interactions
+  // Dropdown interactions
   client.on("interactionCreate", async (interaction) => {
     try {
       if (!interaction.isStringSelectMenu()) return;
 
       const id = interaction.customId ?? "";
-      if (!id.startsWith("eventwiz:")) return;
 
-      // customId = eventwiz:<step>:<guildId>:<userId>
-      const parts = id.split(":");
-      const step = parts[1];
-      const guildId = parts[2];
-      const userId = parts[3];
+      // ---------- Wizard flow ----------
+      if (id.startsWith("eventwiz:")) {
+        const parts = id.split(":"); // eventwiz:<step>:<guildId>:<userId>
+        const step = parts[1];
+        const guildId = parts[2];
+        const userId = parts[3];
 
-      if (!interaction.guildId || interaction.guildId !== guildId) {
-        await interaction.reply({ content: "Wrong server.", ephemeral: true });
-        return;
+        if (!interaction.guildId || interaction.guildId !== guildId) {
+          await interaction.reply({ content: "Wrong server.", ephemeral: true });
+          return;
+        }
+        if (interaction.user.id !== userId) {
+          await interaction.reply({ content: "This menu is not for you.", ephemeral: true });
+          return;
+        }
+
+        const msgLike = { guild: interaction.guild, author: interaction.user, member: interaction.member };
+        if (!hasAdminAccess(msgLike)) {
+          await interaction.reply({ content: "Only the server owner / event admin role can do this.", ephemeral: true });
+          return;
+        }
+
+        const w = getWizard(guildId, userId);
+        if (!w) {
+          await interaction.reply({ content: "Wizard expired. Run `!event set reminder` again.", ephemeral: true });
+          return;
+        }
+
+        const value = interaction.values?.[0];
+
+        if (step === "date") {
+          w.date = value;
+          w.step = "hour";
+          await interaction.update({
+            content: `✅ Date selected: **${w.date}** (UTC)\nNow pick the **hour (UTC)**:`,
+            components: [makeHourMenu(guildId, userId)],
+          });
+          return;
+        }
+
+        if (step === "hour") {
+          w.hour = Number(value);
+          w.step = "event";
+          const cfg = getGuildConfig(guildId);
+          await interaction.update({
+            content:
+              `✅ Date: **${w.date}**\n` +
+              `✅ Hour: **${String(w.hour).padStart(2, "0")}:00 UTC**\n` +
+              `Now pick the **event**:`,
+            components: [makeEventMenu(guildId, userId, cfg.events)],
+          });
+          return;
+        }
+
+        if (step === "event") {
+          w.eventName = value;
+
+          const iso = buildUtcIso(w.date, w.hour);
+          const reminder = {
+            id: crypto.randomUUID(),
+            eventName: w.eventName,
+            timeUtcIso: iso,
+            createdBy: userId,
+            createdAtIso: new Date().toISOString(),
+          };
+
+          // ✅ does NOT overwrite; it appends (unlimited reminders)
+          addReminder(guildId, reminder);
+          scheduleReminder(client, guildId, reminder);
+
+          wizards.delete(wizardKey(guildId, userId));
+
+          const eventTime = new Date(iso);
+          const tUnix = toUnixSeconds(eventTime);
+          const t60Unix = Math.floor((eventTime.getTime() - 60 * 60 * 1000) / 1000);
+          const t10Unix = Math.floor((eventTime.getTime() - 10 * 60 * 1000) / 1000);
+
+          await interaction.update({
+            content:
+              `🏆 **Reminder set!**\n` +
+              `• Event: **${reminder.eventName}**\n` +
+              `• Event time: <t:${tUnix}:F>\n` +
+              `• 1 hour ping: <t:${t60Unix}:F>\n` +
+              `• 10 min ping: <t:${t10Unix}:F>`,
+            components: [],
+          });
+          return;
+        }
       }
-      if (interaction.user.id !== userId) {
-        await interaction.reply({ content: "This menu is not for you.", ephemeral: true });
-        return;
-      }
 
-      // Permission gate (same as command gate)
-      const fakeMsg = { guild: interaction.guild, author: interaction.user, member: interaction.member };
-      if (!hasAdminAccess(fakeMsg)) {
-        await interaction.reply({ content: "Only the server owner / event admin role can do this.", ephemeral: true });
-        return;
-      }
+      // ---------- Delete reminder dropdown ----------
+      if (id.startsWith("eventdel:reminder:")) {
+        const parts = id.split(":"); // eventdel:reminder:<guildId>:<userId>
+        const guildId = parts[2];
+        const userId = parts[3];
 
-      const w = getWizard(guildId, userId);
-      if (!w) {
-        await interaction.reply({ content: "Wizard expired. Run `!event set reminder` again.", ephemeral: true });
-        return;
-      }
+        if (!interaction.guildId || interaction.guildId !== guildId) {
+          await interaction.reply({ content: "Wrong server.", ephemeral: true });
+          return;
+        }
+        if (interaction.user.id !== userId) {
+          await interaction.reply({ content: "This menu is not for you.", ephemeral: true });
+          return;
+        }
 
-      const value = interaction.values?.[0];
+        const msgLike = { guild: interaction.guild, author: interaction.user, member: interaction.member };
+        if (!hasAdminAccess(msgLike)) {
+          await interaction.reply({ content: "Only the server owner / event admin role can do this.", ephemeral: true });
+          return;
+        }
 
-      if (step === "date") {
-        w.date = value;
-        w.step = "hour";
-        const row = makeHourMenu(guildId, userId);
+        const reminderId = interaction.values?.[0];
+        if (!reminderId || reminderId === "none") {
+          await interaction.update({ content: "No reminders to delete.", components: [] });
+          return;
+        }
+
+        // clear timers + remove from DB
+        clearReminderTimers(guildId, reminderId);
+        removeReminder(guildId, reminderId);
+
         await interaction.update({
-          content: `✅ Date selected: **${w.date}** (UTC)\nNow pick the **hour (UTC)**:`,
-          components: [row],
-        });
-        return;
-      }
-
-      if (step === "hour") {
-        w.hour = Number(value);
-        w.step = "event";
-        const cfg = getGuildConfig(guildId);
-        const row = makeEventMenu(guildId, userId, cfg.events);
-        await interaction.update({
-          content: `✅ Date: **${w.date}**\n✅ Hour: **${String(w.hour).padStart(2, "0")}:00 UTC**\nNow pick the **event**:`,
-          components: [row],
-        });
-        return;
-      }
-
-      if (step === "event") {
-        w.eventName = value;
-
-        const iso = buildUtcIso(w.date, w.hour);
-        const reminder = {
-          id: crypto.randomUUID(),
-          eventName: w.eventName,
-          timeUtcIso: iso,
-          createdBy: userId,
-          createdAtIso: new Date().toISOString(),
-        };
-
-        addReminder(guildId, reminder);
-        scheduleReminder(client, guildId, reminder);
-
-        // close wizard
-        wizards.delete(wizardKey(guildId, userId));
-
-        const eventTime = new Date(iso);
-        const tUnix = toUnixSeconds(eventTime);
-        const t60Unix = Math.floor((eventTime.getTime() - 60 * 60 * 1000) / 1000);
-        const t10Unix = Math.floor((eventTime.getTime() - 10 * 60 * 1000) / 1000);
-
-        await interaction.update({
-          content:
-            `🏆 **Reminder set!**\n` +
-            `• Event: **${reminder.eventName}**\n` +
-            `• Event time: <t:${tUnix}:F>\n` +
-            `• 1 hour ping: <t:${t60Unix}:F>\n` +
-            `• 10 min ping: <t:${t10Unix}:F>`,
+          content: "✅ Reminder deleted.",
           components: [],
         });
         return;
@@ -442,14 +501,16 @@ export function setupEventReminder(client) {
       "",
       "`!event help`",
       "`!event set reminder` (dropdown wizard)",
-      "`!event scheduled` (or `!event sheduled`)",
+      "`!event scheduled`",
+      "`!event del reminder` (dropdown delete)",
       "`!event testping`",
       "`!event set role @role`",
       "`!event set channel #channel`",
       "`!event ch1 text <text>` (use {event})",
       "`!event ch10 text <text>` (use {event})",
-      "`!event set admin role @role`",
+      "`!event set admin role @role` (owner only)",
       "`!event add <event name>`",
+      "`!event del <event name>`",
       "",
       "**Defaults:**",
       "- ch1: `{event} in 1 hour!`",
@@ -460,6 +521,9 @@ export function setupEventReminder(client) {
       await msg.reply(help);
       return;
     }
+
+    // Accept typo alias but don't show it in help
+    const isScheduledCmd = sub === "scheduled" || sub === "sheduled";
 
     // permissions: owner or admin role
     if (!hasAdminAccess(msg)) {
@@ -480,17 +544,15 @@ export function setupEventReminder(client) {
       }
 
       startWizard(msg.guild.id, msg.author.id);
-      const row = makeDateMenu(msg.guild.id, msg.author.id);
-
       await msg.reply({
         content: "Select the **date (UTC)** for the reminder:",
-        components: [row],
+        components: [makeDateMenu(msg.guild.id, msg.author.id)],
       });
       return;
     }
 
-    // !event scheduled / sheduled
-    if (sub === "scheduled" || sub === "sheduled") {
+    // !event scheduled (and accept sheduled)
+    if (isScheduledCmd) {
       const cfg = getGuildConfig(msg.guild.id);
       const list = cfg.reminders ?? [];
 
@@ -499,7 +561,6 @@ export function setupEventReminder(client) {
         return;
       }
 
-      // sort by event time
       const sorted = [...list].sort((a, b) => new Date(a.timeUtcIso) - new Date(b.timeUtcIso));
 
       const lines = sorted.map((r) => {
@@ -510,8 +571,40 @@ export function setupEventReminder(client) {
         return `• **${r.eventName}** — Event: <t:${tUnix}:F> | 1h: <t:${t60Unix}:F> | 10m: <t:${t10Unix}:F>`;
       });
 
-      const header = `📌 **Scheduled reminders (${lines.length})**`;
-      await msg.reply([header, ...lines].join("\n"));
+      await msg.reply([`📌 **Scheduled reminders (${lines.length})**`, ...lines].join("\n"));
+      return;
+    }
+
+    // !event del reminder  (dropdown)
+    if (sub === "del" && (args[1] ?? "").toLowerCase() === "reminder") {
+      const cfg = getGuildConfig(msg.guild.id);
+      const reminders = cfg.reminders ?? [];
+      if (reminders.length === 0) {
+        await msg.reply("No reminders to delete.");
+        return;
+      }
+
+      await msg.reply({
+        content: "Select a reminder to **delete**:",
+        components: [makeDeleteReminderMenu(msg.guild.id, msg.author.id, reminders)],
+      });
+      return;
+    }
+
+    // !event del <event name>
+    if (sub === "del") {
+      const name = args.slice(1).join(" ").trim();
+      if (!name) {
+        await msg.reply("Usage: `!event del <event name>`  OR  `!event del reminder`");
+        return;
+      }
+      const cfg = getGuildConfig(msg.guild.id);
+      if (!(cfg.events ?? []).includes(name)) {
+        await msg.reply("That event name is not in the dropdown list.");
+        return;
+      }
+      deleteEventName(msg.guild.id, name);
+      await msg.reply(`✅ Deleted event: **${name}**`);
       return;
     }
 
@@ -535,9 +628,12 @@ export function setupEventReminder(client) {
       return;
     }
 
-    // !event set admin role @role
-    if (sub === "set" && (args[1] ?? "").toLowerCase() === "admin" && (args[2] ?? "").toLowerCase() === "role") {
-      // only owner can set admin role
+    // !event set admin role @role  (owner only)
+    if (
+      sub === "set" &&
+      (args[1] ?? "").toLowerCase() === "admin" &&
+      (args[2] ?? "").toLowerCase() === "role"
+    ) {
       if (!isGuildOwner(msg)) {
         await msg.reply("Only the **server owner** can set the admin role.");
         return;
@@ -560,7 +656,7 @@ export function setupEventReminder(client) {
         return;
       }
       const cfg = getGuildConfig(msg.guild.id);
-      if (cfg.events.includes(name)) {
+      if ((cfg.events ?? []).includes(name)) {
         await msg.reply("That event already exists.");
         return;
       }
@@ -594,7 +690,7 @@ export function setupEventReminder(client) {
       return;
     }
 
-    // !event testping (sends two pings: 30m + 10m style)
+    // !event testping (sends two pings: 30m + 10m style; does NOT create reminders)
     if (sub === "testping") {
       const cfg = getGuildConfig(msg.guild.id);
       if (!cfg.pingChannelId || !cfg.pingRoleId) {
@@ -615,19 +711,11 @@ export function setupEventReminder(client) {
       }
 
       const mention = `<@&${cfg.pingRoleId}>`;
+      const thirtyText = renderTemplate("{event} in 30 min!", "**TEST EVENT**");
+      const tenText = renderTemplate(cfg.ch10Text, "**TEST EVENT**");
 
-      // 30 min test message (does not create reminder, does not delete anything)
-      const thirtyText = renderTemplate("{event} in 30 min!", "TEST EVENT");
-      const tenText = renderTemplate(cfg.ch10Text, "TEST EVENT");
-
-      await channel.send({
-        content: `${mention} ${thirtyText}`,
-        allowedMentions: { roles: [cfg.pingRoleId] },
-      });
-      await channel.send({
-        content: `${mention} ${tenText}`,
-        allowedMentions: { roles: [cfg.pingRoleId] },
-      });
+      await channel.send({ content: `${mention} ${thirtyText}`, allowedMentions: { roles: [cfg.pingRoleId] } });
+      await channel.send({ content: `${mention} ${tenText}`, allowedMentions: { roles: [cfg.pingRoleId] } });
 
       await msg.reply("✅ Test ping sent (30 min + 10 min style).");
       return;
