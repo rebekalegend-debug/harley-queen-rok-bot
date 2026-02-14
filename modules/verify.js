@@ -482,7 +482,9 @@ export function setupVerify(client) {
 `Welcome ${member}💗!
 
 Please upload a screenshot of your **Rise of Kingdoms profile** here.
-📸👉🪪.`
+📸👉🪪
+.
+.`
     );
   });
 
