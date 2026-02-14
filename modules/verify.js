@@ -221,6 +221,13 @@ async function handleVerification(client, { member, attachment }) {
         `❌ Attempt to **impersonate or bypass** detected!\nYou are now locked. Please **contact an admin**.`
       );
 lockedUsers.add(user.id);
+
+const cfg = loadConfig();
+if (!cfg.locked.includes(user.id)) {
+  cfg.locked.push(user.id);
+  saveConfig(cfg);
+}
+
       if (!cfg.verifyChannel) {
   console.log("⚠️ Verify channel not set.");
   return;
@@ -292,19 +299,42 @@ async function rejectUser(user, member, type) {
 /* ================= MAIN EXPORT ================= */
 
 export function setupVerify(client) {
-
+const cfg = loadConfig();
+if (cfg.locked && Array.isArray(cfg.locked)) {
+  for (const id of cfg.locked) {
+    lockedUsers.add(id);
+  }
+}
   client.on(Events.GuildMemberAdd, async (member) => {
+
+  const cfg = loadConfig();
+
+  if (cfg.locked && cfg.locked.includes(member.id)) {
     try {
       await member.send(
-        `Welcome ${member}💗!\n🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here.\n📸👉🪪.`
+`🚫 You are banned from verification due to a previous bypass attempt.
+
+If you believe this was a mistake, please contact an admin.
+
+Thank you.`
       );
     } catch {}
-  });
+
+    return; // DO NOT start verification
+  }
+
+  try {
+    await member.send(
+      `Welcome ${member}💗!\n🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here.\n📸👉🪪.`
+    );
+  } catch {}
+
+});
 
   client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
-  const cfg = loadConfig();
+  
 
   /* ================= DM MESSAGES ================= */
   if (!message.guild) {
@@ -312,9 +342,7 @@ export function setupVerify(client) {
     // If user is locked → always reply
     if (lockedUsers.has(message.author.id)) {
       await message.channel.send(
-`I'm just a bot, please reach out to <@297057337590546434>
-
-harley id:297057337590546434`
+`I'm just a bot, please reach out to <@297057337590546434>`
       );
       return;
     }
