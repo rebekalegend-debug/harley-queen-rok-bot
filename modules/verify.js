@@ -1,5 +1,5 @@
 // modules/verify.js
-console.log("🔥 VERIFY MODULE BUILD 2026-02-14 (QUEUE + OCR FIRST -> ICON CHECK -> WEBP -> 3-REJECT LOCK + DM MODE)");
+console.log("🔥 VERIFY MODULE BUILD 2026-02-13 FINAL (QUEUE + OCR FIRST -> ICON CHECK -> WEBP -> 3-REJECT LOCK)");
 
 import fs from "node:fs";
 import path from "node:path";
@@ -33,7 +33,7 @@ async function safeDM(member, text) {
   try {
     await member.send(text);
   } catch {
-    // user DMs closed — fail silently
+    // DM closed — fail silently
   }
 }
 
@@ -50,7 +50,8 @@ function ordinal(n) {
 }
 
 function getQueuePositionIncludingRunning(userId) {
-  let pos = verifyRunning ? 1 : 0;
+  let pos = 0;
+  if (verifyRunning) pos += 1;
   for (const job of verifyQueue) {
     pos += 1;
     if (job.member.id === userId) return pos;
@@ -112,13 +113,7 @@ async function runVerificationJob(job) {
   }
 }
 
-/* ================= REST OF YOUR ORIGINAL CODE UNCHANGED UNTIL RESULT HANDLER ================= */
-
-/* KEEP EVERYTHING EXACTLY THE SAME ABOVE THIS POINT */
-/* (OCR, ICON, CSV, HELPERS — UNCHANGED FROM YOUR FILE) */
-
-
-/* ================= RESULT HANDLER (DM MODE) ================= */
+/* ================= RESULT HANDLER ================= */
 
 async function handleVerifyResult({ message, member, result, verifyCfg }) {
   if (!result.ok) {
@@ -126,39 +121,30 @@ async function handleVerifyResult({ message, member, result, verifyCfg }) {
 
     if (result.reason === "NO_ID") {
       const n = addReject(member.id);
-
       if (n >= 3) {
         lockedContactAdmin.set(member.id, true);
         await safeDM(member,
-          `❌ I still can’t read your ID after **3 tries**.\n` +
-          `Stop uploading. Please contact an admin/officer for manual verification.`
+          `❌ I still can’t read your ID after 3 tries.\nContact admin for manual verification.`
         );
         return;
       }
 
       await safeDM(member,
-        `❌ I couldn’t read your **Governor ID**.\n` +
-        `Upload a clearer full profile screenshot (no crop).\n` +
-        `Attempts: **${n}/3**`
+        `❌ I couldn’t read your Governor ID.\nAttempts: ${n}/3`
       );
       return;
     }
 
     if (result.reason === "MISSING_ICONS") {
       const n = addReject(member.id);
-
       if (n >= 3) {
         lockedContactAdmin.set(member.id, true);
-        await safeDM(member,
-          `❌ Screenshot rejected 3 times.\nContact an admin.`
-        );
+        await safeDM(member, `❌ Screenshot rejected 3 times. Contact admin.`);
         return;
       }
 
       await safeDM(member,
-        `❌ Screenshot not taken from your own profile screen.\n` +
-        `Take a fresh full screenshot.\n` +
-        `Attempts: **${n}/3**`
+        `❌ Screenshot not valid profile screen.\nAttempts: ${n}/3`
       );
       return;
     }
@@ -166,9 +152,8 @@ async function handleVerifyResult({ message, member, result, verifyCfg }) {
     if (result.reason === "ID_NOT_FOUND") {
       lockedUntilRejoin.set(member.id, true);
       lockedContactAdmin.set(member.id, true);
-
       await safeDM(member,
-        `❌ Your ID (**${result.govId}**) is not in our database.\nContact an admin.`
+        `❌ Your ID (${result.govId}) is not in our database.\nContact admin.`
       );
       return;
     }
@@ -190,13 +175,14 @@ async function handleVerifyResult({ message, member, result, verifyCfg }) {
   verifiedDone.set(member.id, true);
 
   await safeDM(member,
-    `✅ Verified as **${result.cleanName}** (ID: ${result.govId}). Role granted.`
+    `✅ Verified as ${result.cleanName} (ID: ${result.govId}). Role granted.`
   );
 }
 
-/* ===================== EXPORT ===================== */
+/* ================= EXPORT ================= */
 
 export function setupVerify(client) {
+
   client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
@@ -215,7 +201,7 @@ export function setupVerify(client) {
       return message.delete().catch(() => {});
     }
 
-    const imgAtt = message.attachments.find((a) => a.contentType?.startsWith("image/"));
+    const imgAtt = message.attachments.find(a => a.contentType?.startsWith("image/"));
     if (!imgAtt) return message.delete().catch(() => {});
     if (verifiedDone.get(member.id)) return message.delete().catch(() => {});
     if (isUserAlreadyQueued(member.id)) return message.delete().catch(() => {});
@@ -233,11 +219,10 @@ export function setupVerify(client) {
     const eta = estimateSeconds(position);
 
     await safeDM(member,
-      `⏳ Please wait, I'm verifying your image…\n` +
-      `You are **${ordinal(position)} in queue**.\n` +
-      `Estimated time: ~${eta} seconds.`
+      `⏳ You are ${ordinal(position)} in queue.\nEstimated time: ~${eta} seconds.`
     );
 
     processVerifyQueue();
   });
+
 }
