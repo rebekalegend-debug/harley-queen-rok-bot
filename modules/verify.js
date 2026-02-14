@@ -414,7 +414,7 @@ if (!message.guild) {
   // If user is permanently locked → always reply
   if (lockedUsers.has(message.author.id)) {
     await message.channel.send(
-`I'm just a bot, please reach out to <@297057337590546434>`
+`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
     );
     return;
   }
@@ -425,7 +425,7 @@ if (!message.guild) {
     const guildId = pendingGuild.get(message.author.id);
     if (!guildId) {
       await message.channel.send(
-`I'm just a bot, please reach out to <@297057337590546434>`
+`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
       );
       return;
     }
@@ -454,7 +454,7 @@ if (!message.guild) {
 
     // If DM text but not image → reply
   await message.channel.send(
-`I'm just a bot, please reach out to <@297057337590546434>`
+`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
   );
 
   return;
