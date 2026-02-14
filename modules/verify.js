@@ -87,12 +87,22 @@ async function extractGovernorId(buffer, db) {
 
   console.log("Candidates found:", candidates);
 
-  for (const num of candidates) {
-    if (db.has(num)) {
-      console.log("Matched DB ID:", num);
-      return num;
+  for (const candidate of candidates) {
+
+  // Try all possible substrings between 6–9 digits
+  for (let len = 6; len <= 9; len++) {
+    for (let i = 0; i <= candidate.length - len; i++) {
+
+      const sub = candidate.substring(i, i + len);
+
+      if (db.has(sub)) {
+        console.log("Matched DB ID from substring:", sub);
+        return sub;
+      }
     }
   }
+}
+
 
   return null;
 }
