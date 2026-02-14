@@ -15,7 +15,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DATA_FILE = path.join(__dirname, "data.csv");
-const CONFIG_FILE = path.join(__dirname, "verify.config.json");
+const CONFIG_FILE = "/data/verify.config.json";
+
+if (!fs.existsSync("/data")) {
+  fs.mkdirSync("/data", { recursive: true });
+}
+
 
 const ICONS = [
   path.join(__dirname, "1.png"),
@@ -216,7 +221,17 @@ async function handleVerification(client, { member, attachment }) {
         `❌ Attempt to **impersonate or bypass** detected!\nYou are now locked. Please **contact an admin**.`
       );
 
-      const channel = await client.channels.fetch(cfg.verifyChannel);
+      if (!cfg.verifyChannel) {
+  console.log("⚠️ Verify channel not set.");
+  return;
+}
+
+const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+if (!channel) {
+  console.log("❌ Could not fetch verify channel.");
+  return;
+}
+
       if (channel) {
         await channel.send({
           content: `❌ ${member} tryed an attempt to **impersonate or bypass**!`,
