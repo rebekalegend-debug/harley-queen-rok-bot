@@ -66,28 +66,30 @@ async function extractGovernorId(buffer) {
   const width = metadata.width;
   const height = metadata.height;
 
-  // Crop bottom-left region (where ID usually is)
+  // Crop upper-left profile area
   const cropped = await image
     .extract({
-      left: 0,
-      top: Math.floor(height * 0.65),
-      width: Math.floor(width * 0.5),
-      height: Math.floor(height * 0.35)
+      left: Math.floor(width * 0.05),
+      top: Math.floor(height * 0.15),
+      width: Math.floor(width * 0.45),
+      height: Math.floor(height * 0.25)
     })
-    .resize({ width: 1000 })
+    .resize({ width: 1400 })
     .grayscale()
     .normalize()
     .sharpen()
+    .threshold(150)
     .toBuffer();
 
   const { data } = await Tesseract.recognize(cropped, "eng");
 
-  console.log("=== CROPPED OCR TEXT ===");
+  console.log("=== ID AREA OCR TEXT ===");
   console.log(data.text);
 
-  const digitStream = data.text.replace(/\D/g, "");
+  // Merge all digits (handles split digits)
+  const digits = data.text.replace(/\D/g, "");
 
-  const match = digitStream.match(/\d{7,12}/);
+  const match = digits.match(/\d{7,12}/);
 
   if (!match) return null;
 
