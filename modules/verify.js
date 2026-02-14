@@ -60,28 +60,40 @@ function loadDatabase() {
 /* ================= OCR ================= */
 
 async function extractGovernorId(buffer) {
-  const processed = await sharp(buffer)
-    .resize({ width: 1200 })
+  const image = sharp(buffer);
+  const metadata = await image.metadata();
+
+  const width = metadata.width;
+  const height = metadata.height;
+
+  // Crop bottom-left region (where ID usually is)
+  const cropped = await image
+    .extract({
+      left: 0,
+      top: Math.floor(height * 0.65),
+      width: Math.floor(width * 0.5),
+      height: Math.floor(height * 0.35)
+    })
+    .resize({ width: 1000 })
     .grayscale()
     .normalize()
     .sharpen()
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(processed, "eng");
+  const { data } = await Tesseract.recognize(cropped, "eng");
 
-  console.log("=== OCR RAW TEXT START ===");
+  console.log("=== CROPPED OCR TEXT ===");
   console.log(data.text);
-  console.log("=== OCR RAW TEXT END ===");
 
-  const numbers = data.text.match(/\d{6,15}/g);
+  const digitStream = data.text.replace(/\D/g, "");
 
-  if (!numbers) return null;
+  const match = digitStream.match(/\d{7,12}/);
 
-  // pick the longest number (usually the Governor ID)
-  numbers.sort((a, b) => b.length - a.length);
+  if (!match) return null;
 
-  return numbers[0];
+  return match[0];
 }
+
 /* ================= ICON CHECK ================= */
 
 async function iconCheck(imageBuffer) {
