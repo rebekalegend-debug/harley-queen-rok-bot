@@ -71,40 +71,35 @@ async function extractGovernorId(buffer) {
   const width = metadata.width;
   const height = metadata.height;
 
-  // Crop upper-left profile area
   const cropped = await image
     .extract({
       left: Math.floor(width * 0.05),
       top: Math.floor(height * 0.12),
-      width: Math.floor(width * 0.45),
+      width: Math.floor(width * 0.60),
       height: Math.floor(height * 0.30)
     })
     .resize({ width: 1800 })
     .grayscale()
+    .modulate({ brightness: 1.1 })
     .normalize()
     .sharpen()
-    .threshold(150)
     .toBuffer();
 
   const { data } = await Tesseract.recognize(cropped, "eng");
 
-  console.log("=== ID AREA OCR TEXT ===");
+  console.log("=== ID OCR RAW ===");
   console.log(data.text);
 
- // Remove spaces but keep structure
-const cleaned = data.text.replace(/\s+/g, "");
+  const cleaned = data.text.replace(/\s+/g, "");
+  const candidates = cleaned.match(/\d{6,12}/g);
 
-// Extract all numeric sequences between 6 and 12 digits
-const candidates = cleaned.match(/\d{6,12}/g);
+  if (!candidates) return null;
 
-if (!candidates) return null;
+  candidates.sort((a, b) => b.length - a.length);
 
-// Pick the longest number (usually the Governor ID)
-candidates.sort((a, b) => b.length - a.length);
-
-return candidates[0];
-
+  return candidates[0];
 }
+
 
 /* ================= ICON CHECK ================= */
 
@@ -122,7 +117,7 @@ async function iconCheck(imageBuffer) {
     .extract({
       left: 0,
       top: 0,
-      width: Math.floor(width * 0.45),
+      width: Math.floor(width * 0.60),
       height: Math.floor(height * 0.55)
     })
     .grayscale()
