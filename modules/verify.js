@@ -14,6 +14,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const lockedUsers = new Set();
+const pendingGuild = new Map(); // userId -> guildId
 const DATA_FILE = path.join(__dirname, "DATA.csv");
 const CONFIG_FILE = "/data/verify.config.json";
 const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
@@ -311,7 +312,7 @@ if (!channel) {
     }
 
     await user.send(`✅ You are now verified as **${name}**`);
-
+pendingGuild.delete(member.id);
     const channel = await client.channels.fetch(cfg.verifyChannel);
     if (channel) {
       await channel.send({
@@ -360,7 +361,7 @@ if (cfg.locked && Array.isArray(cfg.locked)) {
   }
 }
  client.on(Events.GuildMemberAdd, async (member) => {
-
+pendingGuild.set(member.id, member.guild.id);
   const cfg = loadConfig();
 
   // 🚫 If permanently locked → DO NOT send welcome
@@ -420,17 +421,24 @@ The image must be:
 
     // If DM contains image → verification flow
     if (message.attachments.size > 0) {
-      let guild = null;
-
-for (const g of client.guilds.cache.values()) {
-  try {
-    const member = await g.members.fetch(message.author.id);
-    if (member) {
-      guild = g;
-      break;
-    }
-  } catch {}
+     const guildId = pendingGuild.get(message.author.id);
+if (!guildId) {
+  console.log("No pending guild found for user:", message.author.id);
+  return;
 }
+
+const guild = client.guilds.cache.get(guildId);
+if (!guild) {
+  console.log("Guild not found:", guildId);
+  return;
+}
+
+const member = await guild.members.fetch(message.author.id).catch(() => null);
+if (!member) {
+  console.log("Member not found in guild:", guildId);
+  return;
+}
+
 
       if (!guild) return;
 
