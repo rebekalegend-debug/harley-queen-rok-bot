@@ -75,11 +75,11 @@ async function extractGovernorId(buffer) {
   const cropped = await image
     .extract({
       left: Math.floor(width * 0.05),
-      top: Math.floor(height * 0.15),
+      top: Math.floor(height * 0.12),
       width: Math.floor(width * 0.45),
-      height: Math.floor(height * 0.25)
+      height: Math.floor(height * 0.30)
     })
-    .resize({ width: 1400 })
+    .resize({ width: 1800 })
     .grayscale()
     .normalize()
     .sharpen()
@@ -91,14 +91,19 @@ async function extractGovernorId(buffer) {
   console.log("=== ID AREA OCR TEXT ===");
   console.log(data.text);
 
-  // Merge all digits (handles split digits)
-  const digits = data.text.replace(/\D/g, "");
+ // Remove spaces but keep structure
+const cleaned = data.text.replace(/\s+/g, "");
 
-  const match = digits.match(/\d{7,12}/);
+// Extract all numeric sequences between 6 and 12 digits
+const candidates = cleaned.match(/\d{6,12}/g);
 
-  if (!match) return null;
+if (!candidates) return null;
 
-  return match[0];
+// Pick the longest number (usually the Governor ID)
+candidates.sort((a, b) => b.length - a.length);
+
+return candidates[0];
+
 }
 
 /* ================= ICON CHECK ================= */
