@@ -65,36 +65,35 @@ function loadDatabase() {
 /* ================= OCR ================= */
 
 async function extractGovernorId(buffer) {
-  const image = sharp(buffer);
-  const metadata = await image.metadata();
 
-  const width = metadata.width;
-  const height = metadata.height;
-
-  const cropped = await image
-    .extract({
-      left: Math.floor(width * 0.05),
-      top: Math.floor(height * 0.12),
-      width: Math.floor(width * 0.65),
-      height: Math.floor(height * 0.28)
-    })
+  const processed = await sharp(buffer)
     .resize({ width: 1600 })
     .grayscale()
+    .normalize()
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(cropped, "eng");
+  const { data } = await Tesseract.recognize(processed, "eng");
 
-  console.log("=== OCR RAW ID REGION ===");
+  console.log("=== FULL OCR TEXT ===");
   console.log(data.text);
 
-  const cleaned = data.text.replace(/\s+/g, "");
+  // Remove commas and spaces
+  const cleaned = data.text.replace(/[, ]+/g, "");
+
+  // Extract numeric sequences 6–12 digits
   const candidates = cleaned.match(/\d{6,12}/g);
 
   if (!candidates) return null;
 
-  candidates.sort((a, b) => b.length - a.length);
+  // Filter out obvious Power/KP values (usually > 9 digits)
+  const filtered = candidates.filter(n => n.length >= 7 && n.length <= 9);
 
-  return candidates[0];
+  if (filtered.length === 0) return null;
+
+  // Pick the shortest valid candidate (ID usually shorter than KP)
+  filtered.sort((a, b) => a.length - b.length);
+
+  return filtered[0];
 }
 
 
