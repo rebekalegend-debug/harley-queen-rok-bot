@@ -305,14 +305,18 @@ if (cfg.locked && Array.isArray(cfg.locked)) {
     lockedUsers.add(id);
   }
 }
-  client.on(Events.GuildMemberAdd, async (member) => {
+ client.on(Events.GuildMemberAdd, async (member) => {
 
   const cfg = loadConfig();
 
+  // 🚫 If permanently locked → DO NOT send welcome
   if (cfg.locked && cfg.locked.includes(member.id)) {
+
+    console.log("Blocked rejoin attempt:", member.id);
+
     try {
       await member.send(
-`🚫 You are banned from verification due to a previous bypass attempt.
+`🚫 You are banned from verification due to attempting to bypass the system.
 
 If you believe this was a mistake, please contact an admin.
 
@@ -320,9 +324,10 @@ Thank you.`
       );
     } catch {}
 
-    return; // DO NOT start verification
+    return; // 🔴 VERY IMPORTANT — stop here
   }
 
+  // ✅ Normal users get welcome
   try {
     await member.send(
       `Welcome ${member}💗!\n🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here.\n📸👉🪪.`
