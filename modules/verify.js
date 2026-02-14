@@ -227,7 +227,7 @@ async function processQueue(client) {
 
 async function handleVerification(client, { member, attachment }) {
   const cfg = loadConfig();
- console.log("Checking ID:", cleanId);
+ 
 console.log("DB contains ID?", db.has(cleanId));
 console.log("Starting verification for:", member.user.id);
   const db = loadDatabase();
