@@ -1,302 +1,276 @@
 // modules/verify.js
-console.log("🔥 VERIFY MODULE BUILD 2026-02-13 FINAL (QUEUE + OCR FIRST -> ICON CHECK -> WEBP -> 3-REJECT LOCK)");
+// 🔥 VERIFY MODULE 2026 - CLEAN CHANNEL + DM FLOW + OCR FIRST
 
-import fs from "node:fs";
-import path from "node:path";
-import http from "node:http";
-import { fileURLToPath } from "node:url";
+import fs from "fs";
+import path from "path";
 import sharp from "sharp";
-
-import { Events, PermissionFlagsBits } from "discord.js";
-import { parse } from "csv-parse/sync";
-import { getGuild, setGuild } from "./guildConfig.js";
-
-import Jimp from "jimp";
-import { createWorker } from "tesseract.js";
+import Tesseract from "tesseract.js";
+import { fileURLToPath } from "url";
+import {
+  Events,
+  PermissionFlagsBits
+} from "discord.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const HARLEY_QUINN_USER_ID = "297057337590546434";
+const DATA_FILE = path.join(__dirname, "data.csv");
+const CONFIG_FILE = path.join(__dirname, "verify.config.json");
 
-const DATA_FILE = path.join(__dirname, "DATA.csv");
-const ICON_FILES = ["1.png", "2.png", "3.png"].map((f) => path.join(__dirname, f));
+const ICONS = [
+  path.join(__dirname, "1.png"),
+  path.join(__dirname, "2.png"),
+  path.join(__dirname, "3.png")
+];
 
-const verifiedDone = new Map();
-const lockedUntilRejoin = new Map();
-const rejectCount = new Map();
-const lockedContactAdmin = new Map();
+const PROCESS_TIME = 40; // seconds average per user
 
-/* ================= DM HELPER ================= */
+let queue = [];
+let processing = false;
+let userAttempts = new Map();
 
-async function safeDM(member, content) {
+/* ================= CONFIG ================= */
+
+function loadConfig() {
   try {
-    await member.send(content);
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
   } catch {
-    // user has DMs closed
+    return { verifyChannel: null, roleId: null };
   }
 }
 
-/* ================= VERIFY QUEUE ================= */
-
-const VERIFY_TIME_PER_IMAGE = 20;
-const verifyQueue = [];
-let verifyRunning = false;
-
-function ordinal(n) {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+function saveConfig(cfg) {
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
 }
 
-function getQueuePositionIncludingRunning(userId) {
-  let pos = 0;
-  if (verifyRunning) pos += 1;
-  for (const job of verifyQueue) {
-    pos += 1;
-    if (job.member.id === userId) return pos;
+/* ================= CSV LOAD ================= */
+
+function loadDatabase() {
+  const map = new Map();
+  if (!fs.existsSync(DATA_FILE)) return map;
+
+  const rows = fs.readFileSync(DATA_FILE, "utf8").split("\n");
+  for (const row of rows) {
+    const [id, name] = row.split(",");
+    if (id && name) map.set(id.trim(), name.trim());
   }
-  return null;
+  return map;
 }
 
-function estimateSeconds(position) {
-  return Math.max(VERIFY_TIME_PER_IMAGE, position * VERIFY_TIME_PER_IMAGE);
+/* ================= OCR ================= */
+
+async function extractGovernorId(buffer) {
+  const {
+    data: { text }
+  } = await Tesseract.recognize(buffer, "eng");
+
+  const match = text.match(/ID[:\s]*([0-9]{6,12})/i);
+  if (!match) return null;
+  return match[1];
 }
 
-function isUserAlreadyQueued(userId) {
-  return verifyQueue.some((j) => j.member.id === userId);
+/* ================= ICON CHECK ================= */
+
+async function iconCheck(imageBuffer) {
+  const resized = await sharp(imageBuffer)
+    .resize(500)
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  for (const iconPath of ICONS) {
+    if (!fs.existsSync(iconPath)) continue;
+
+    const icon = await sharp(iconPath)
+      .resize(80)
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // simple pixel similarity scan
+    let matchScore = 0;
+    for (let i = 0; i < icon.data.length; i++) {
+      if (Math.abs(icon.data[i] - resized.data[i]) < 10) {
+        matchScore++;
+      }
+    }
+
+    if (matchScore > icon.data.length * 0.60) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
-async function processVerifyQueue() {
-  if (verifyRunning) return;
-  verifyRunning = true;
+/* ================= QUEUE SYSTEM ================= */
+
+async function processQueue(client) {
+  if (processing) return;
+  processing = true;
+
+  while (queue.length > 0) {
+    const job = queue.shift();
+    await handleVerification(client, job);
+  }
+
+  processing = false;
+}
+
+/* ================= CORE VERIFY ================= */
+
+async function handleVerification(client, { member, attachment }) {
+  const cfg = loadConfig();
+  const db = loadDatabase();
+
+  const user = member.user;
 
   try {
-    while (verifyQueue.length > 0) {
-      const job = verifyQueue.shift();
-      await runVerificationJob(job);
+    const response = await fetch(attachment.url);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const governorId = await extractGovernorId(buffer);
+
+    if (!governorId) {
+      return rejectUser(user, member, 1, null);
     }
-  } finally {
-    verifyRunning = false;
-  }
-}
 
-async function runVerificationJob(job) {
-  const { message, member, verifyCfg, attachment } = job;
+    const iconValid = await iconCheck(buffer);
 
-  const freshMember = await message.guild.members.fetch(member.id).catch(() => null);
-  if (!freshMember) return;
+    if (!iconValid) {
+      return rejectUser(user, member, 2, null);
+    }
 
-  if (lockedContactAdmin.get(freshMember.id) || lockedUntilRejoin.get(freshMember.id)) {
-    await message.delete().catch(() => {});
-    return;
-  }
+    if (!db.has(governorId)) {
+      await user.send(
+        `❌ Attempt to **impersonate or bypass** detected!\nYou are now locked. Please **contact an admin**.`
+      );
 
-  if (verifyCfg.roleId && freshMember.roles.cache.has(verifyCfg.roleId)) {
-    await message.delete().catch(() => {});
-    return;
-  }
-
-  try {
-    const result = await analyzeAndVerifyFromScreenshot({
-      guild: message.guild,
-      member: freshMember,
-      verifyCfg,
-      attachment,
-    });
-
-    await handleVerifyResult({ message, member: freshMember, result, verifyCfg });
-
-  } catch (e) {
-    console.error("[VERIFY] queue job error:", e?.message ?? e);
-    await message.delete().catch(() => {});
-    await safeDM(freshMember, "❌ Something went wrong reading your screenshot. Try again.");
-  }
-}
-
-/* ================= KEEP-ALIVE ================= */
-
-let httpStarted = false;
-function startHttpKeepAliveOnce() {
-  if (httpStarted) return;
-  httpStarted = true;
-
-  const PORT = process.env.PORT || 8080;
-
-  http.createServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("OK");
-  }).listen(PORT, () => console.log(`🌐 HTTP server listening on ${PORT}`));
-}
-
-/* ================= PERMS ================= */
-
-function isAdminPerm(member) {
-  return member?.permissions?.has?.(PermissionFlagsBits.Administrator);
-}
-
-function isOwner(guild, userId) {
-  return guild?.ownerId === userId;
-}
-
-/* ================= RESULT HANDLER ================= */
-
-async function handleVerifyResult({ message, member, result, verifyCfg }) {
-
-  if (!result.ok) {
-    await message.delete().catch(() => {});
-
-    const n = (rejectCount.get(member.id) ?? 0) + 1;
-    rejectCount.set(member.id, n);
-
-    if (result.reason === "NO_ID") {
-      if (n >= 3) {
-        lockedContactAdmin.set(member.id, true);
-        await safeDM(member,
-          `❌ I still can’t read your ID after **3 tries**.\n` +
-          `Stop uploading. Please **contact an admin/officer** for manual verification.`
-        );
-        return;
+      const channel = await client.channels.fetch(cfg.verifyChannel);
+      if (channel) {
+        await channel.send({
+          content: `❌ ${member} tryed an attempt to **impersonate or bypass**!`,
+          files: [attachment.url]
+        });
       }
 
-      await safeDM(member,
-        `❌ I couldn’t read your **Governor ID**.\n` +
-        `Upload a clearer full profile screenshot (no crop).\n` +
-        `Attempts: **${n}/3**`
-      );
       return;
     }
 
-    if (result.reason === "MISSING_ICONS") {
-      if (n >= 3) {
-        lockedContactAdmin.set(member.id, true);
-        await safeDM(member,
-          `❌ Screenshot rejected **3 times**.\n` +
-          `Stop uploading. Please **contact an admin/officer** for manual verification.`
-        );
-        return;
-      }
+    const name = db.get(governorId);
 
-      await safeDM(member,
-        `❌ This screenshot does **not** look like it was taken from **your own in-game profile screen**.\n` +
-        `⚠️ It may be a **cropped / edited / forwarded** image or an attempt to **impersonate or bypass** the verification.\n\n` +
-        `✅ Please open **your RoK profile**, take a **fresh full screenshot yourself** (no crop), and upload it again.\n` +
-        `If you believe this is a mistake, **contact an admin**.\n` +
-        `Attempts: **${n}/3**`
-      );
-      return;
+    await member.setNickname(name).catch(() => {});
+    if (cfg.roleId) {
+      await member.roles.add(cfg.roleId).catch(() => {});
     }
 
-    if (result.reason === "ID_NOT_FOUND") {
-      lockedUntilRejoin.set(member.id, true);
-      lockedContactAdmin.set(member.id, true);
+    await user.send(`✅ You are now verified as **${name}**`);
 
-      await safeDM(member,
-        `❌ Your ID (**${result.govId}**) is not in our database.\n` +
-        `You are now locked. Please **contact an admin/officer**.`
-      );
-      return;
+    const channel = await client.channels.fetch(cfg.verifyChannel);
+    if (channel) {
+      await channel.send({
+        content: `✅ ${member} verified`,
+        files: [attachment.url]
+      });
     }
+  } catch (err) {
+    console.error(err);
+  }
+}
 
-    if (result.reason === "CSV_ERROR") {
-      await safeDM(member, `❌ Database error. Contact an admin.`);
-      return;
-    }
+/* ================= REJECT SYSTEM ================= */
 
-    if (result.reason === "BOT_MISSING_PERMS") {
-      await safeDM(member, `❌ Bot missing permissions (Manage Nicknames / Manage Roles).`);
-      return;
-    }
+async function rejectUser(user, member, type) {
+  const attempts = (userAttempts.get(user.id) || 0) + 1;
+  userAttempts.set(user.id, attempts);
 
-    await safeDM(member, `❌ Verification failed. Upload again.`);
+  if (attempts >= 3) {
+    await user.send(
+      `❌ Stop uploading. Please **contact an admin**.`
+    );
     return;
   }
 
-  verifiedDone.set(member.id, true);
+  if (type === 1) {
+    await user.send(
+      `❌ I couldn’t read your **Governor ID**.\n🆙 Upload a clearer full profile screenshot (no crop).\nAttempts: **${attempts}/3**`
+    );
+  }
 
-  await safeDM(member,
-    `✅ Verified ${member} as **${result.cleanName}** (ID: ${result.govId}). Role granted.`
-  );
+  if (type === 2) {
+    await user.send(
+      `❌ This screenshot does **not** look like it was taken from **your own in-game profile screen**.\n⚠️ It may be cropped / edited.\n🔁 Please take a fresh full screenshot.\nAttempts: **${attempts}/3**`
+    );
+  }
 }
 
-/* ===================== EXPORT ===================== */
+/* ================= MAIN EXPORT ================= */
 
 export function setupVerify(client) {
+  const cfg = loadConfig();
 
-  startHttpKeepAliveOnce();
-
-  client.once(Events.ClientReady, () => {
-    console.log(`✅ [VERIFY] Logged in as ${client.user.tag}`);
-  });
-
-  // MEMBER JOIN
   client.on(Events.GuildMemberAdd, async (member) => {
-    const cfg = getGuild(member.guild.id).verify;
-    if (!cfg?.channelId) return;
-
-    const channel = await member.guild.channels.fetch(cfg.channelId).catch(() => null);
-    if (!channel) return;
-
-    verifiedDone.delete(member.id);
-    rejectCount.delete(member.id);
-    lockedContactAdmin.delete(member.id);
-    lockedUntilRejoin.delete(member.id);
-
-    await channel.send(
-`Welcome ${member}💗!
-
-Please upload a screenshot of your **Rise of Kingdoms profile** here.
-📸👉🪪.`
-    );
+    try {
+      await member.send(
+        `Welcome ${member}💗!\n🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here.\n📸👉🪪.`
+      );
+    } catch {}
   });
 
-  // MESSAGE CREATE
   client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
 
-    if (!message.guild) {
-      if (message.author.id === HARLEY_QUINN_USER_ID) return;
+    const cfg = loadConfig();
+
+    /* CLEAN VERIFY CHANNEL */
+    if (message.channel.id === cfg.verifyChannel && message.guild) {
+      await message.delete().catch(() => {});
+    }
+
+    /* ADMIN COMMANDS */
+    if (message.content.startsWith("!verify set role")) {
+      if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+      const role = message.mentions.roles.first();
+      if (!role) return message.reply("Mention a role.");
+      cfg.roleId = role.id;
+      saveConfig(cfg);
+      return message.reply("✅ Verify role set.");
+    }
+
+    if (message.content === "!verify status") {
       return message.reply(
-`Hi! I’m just a bot 🤖
-
-Please contact <@${HARLEY_QUINN_USER_ID}> for help.`
-      ).catch(() => {});
+        `Verify Channel: ${cfg.verifyChannel || "Not set"}\nRole: ${
+          cfg.roleId ? `<@&${cfg.roleId}>` : "Not set"
+        }`
+      );
     }
 
-    const guildId = message.guild.id;
-    const verifyCfg = getGuild(guildId).verify || {};
-
-    if (!verifyCfg.channelId || message.channel.id !== verifyCfg.channelId) return;
-
-    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-    if (!member) return message.delete().catch(() => {});
-
-    if (lockedContactAdmin.get(member.id)) return message.delete().catch(() => {});
-    if (lockedUntilRejoin.get(member.id)) return message.delete().catch(() => {});
-    if (verifyCfg.roleId && member.roles.cache.has(verifyCfg.roleId)) {
-      return message.delete().catch(() => {});
+    if (message.content.startsWith("!set verify channel")) {
+      if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+      cfg.verifyChannel = message.channel.id;
+      saveConfig(cfg);
+      return message.reply("✅ This channel set as verify log.");
     }
 
-    const imgAtt = message.attachments.find(a =>
-      a.contentType?.startsWith("image/")
-    );
+    /* DM IMAGE HANDLER */
+    if (!message.guild && message.attachments.size > 0) {
+      const member = [...client.guilds.cache.values()][0].members.cache.get(message.author.id);
+      if (!member) return;
 
-    if (!imgAtt) return message.delete().catch(() => {});
-    if (verifiedDone.get(member.id)) return message.delete().catch(() => {});
-    if (isUserAlreadyQueued(member.id)) return message.delete().catch(() => {});
-    if (!verifyCfg.roleId) return;
+      const position = queue.length;
+      const waitTime = position * PROCESS_TIME;
 
-    verifyQueue.push({ message, member, verifyCfg, attachment: imgAtt });
+      await message.author.send(
+        `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
+      );
 
-    const position = getQueuePositionIncludingRunning(member.id) ?? 1;
-    const eta = estimateSeconds(position);
+      queue.push({
+        member,
+        attachment: message.attachments.first()
+      });
 
-    await safeDM(member,
-      `⏳ Please wait, I'm verifying your image…\n` +
-      `You are **${ordinal(position)} in queue**.\n` +
-      `Estimated time: **~${eta} seconds**.`
-    );
-
-    processVerifyQueue();
+      processQueue(client);
+    }
   });
 }
