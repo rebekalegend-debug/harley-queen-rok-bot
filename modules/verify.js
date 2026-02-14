@@ -207,9 +207,11 @@ async function processQueue(client) {
   if (processing) return;
 
   processing = true;
-console.log("Queue length:", queue.length);
+
   try {
     while (queue.length > 0) {
+      console.log("Queue length:", queue.length);
+
       const job = queue.shift();
       await handleVerification(client, job);
     }
@@ -219,6 +221,7 @@ console.log("Queue length:", queue.length);
     processing = false;
   }
 }
+
 
 /* ================= CORE VERIFY ================= */
 
