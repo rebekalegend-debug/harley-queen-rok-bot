@@ -246,13 +246,13 @@ async function handleVerification(client, { member, attachment }) {
     console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
 
     if (!cleanId) {
-      return rejectUser(user, member, 1, null);
+      return rejectUser(user, member, 1, attachment);
     }
 
     const iconValid = await iconCheck(buffer);
 
     if (!iconValid) {
-      return rejectUser(user, member, 2, null);
+      return rejectUser(user, member, 2, attachment);
     }
 
     if (!db.has(cleanId)) {
@@ -327,14 +327,29 @@ pendingGuild.delete(member.id);
 
 /* ================= REJECT SYSTEM ================= */
 
-async function rejectUser(user, member, type) {
+async function rejectUser(user, member, type, attachment) {
   const attempts = (userAttempts.get(user.id) || 0) + 1;
   userAttempts.set(user.id, attempts);
 
   if (attempts >= 3) {
+
     await user.send(
       `❌ Stop uploading. Please **contact an admin**.`
     );
+
+    const cfg = loadConfig();
+
+    if (cfg.verifyChannel) {
+      const channel = await member.guild.channels.fetch(cfg.verifyChannel).catch(() => null);
+
+      if (channel && attachment) {
+        await channel.send({
+          content: `❌ ${member} failed to verify.\nI cannot clearly read the Governor ID due to low quality or incorrect screenshot.\nAn **admin** please assist.`,
+          files: [attachment.url]
+        });
+      }
+    }
+
     return;
   }
 
