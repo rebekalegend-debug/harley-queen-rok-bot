@@ -73,38 +73,36 @@ async function extractGovernorId(buffer) {
   const width = metadata.width;
   const height = metadata.height;
 
-  // Large left profile panel crop
+  // Large left profile area
   const panel = await image
     .extract({
       left: 0,
-      top: Math.floor(height * 0.10),
+      top: Math.floor(height * 0.12),
       width: Math.floor(width * 0.60),
-      height: Math.floor(height * 0.50)
+      height: Math.floor(height * 0.35)
     })
-    .resize({ width: 1400 })
+    .resize({ width: 1600 })
     .grayscale()
-    .normalize()
+    .threshold(150) // strong threshold isolates white digits
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(panel, "eng");
+  const { data } = await Tesseract.recognize(panel, "eng", {
+    tessedit_char_whitelist: "0123456789",
+  });
 
-  console.log("=== PANEL OCR ===");
+  console.log("=== DIGIT OCR ===");
   console.log(data.text);
 
-  // Remove commas and spaces
-  const cleaned = data.text.replace(/[, ]+/g, "");
+  const cleaned = data.text.replace(/\D/g, "");
 
-  // Extract 7–9 digit numbers
-  const candidates = cleaned.match(/\d{7,9}/g);
+  if (cleaned.length >= 7 && cleaned.length <= 10) {
+    return cleaned;
+  }
 
-  if (!candidates) return null;
+  const match = cleaned.match(/\d{7,9}/);
 
-  // Governor ID is usually the smallest valid large number
-  candidates.sort((a, b) => a.length - b.length);
-
-  return candidates[0];
+  return match ? match[0] : null;
 }
-
 
 
 /* ================= ICON CHECK ================= */
