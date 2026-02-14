@@ -257,7 +257,7 @@ async function handleVerification(client, { member, attachment }) {
 
     if (!db.has(cleanId)) {
       await user.send(
-        `❌ Attempt to **impersonate or bypass** detected!\nYou are now locked. Please **contact an admin**.`
+        `❌ You uploaded a farm account profile, or attempting to **impersonate or bypass** the system!\nYou are now locked. Please **contact an admin**.`
       );
 lockedUsers.add(user.id);
 
@@ -286,7 +286,7 @@ if (!channel) {
 
       if (channel) {
         await channel.send({
-          content: `❌ ${member} tryed an attempt to **impersonate or bypass**!`,
+          content: `❌ ${member} uploaded a farm account, or trying to **impersonate someone or bypass my system**!`,
           files: [attachment.url]
         });
       }
@@ -316,7 +316,7 @@ pendingGuild.delete(member.id);
     const channel = await client.channels.fetch(cfg.verifyChannel);
     if (channel) {
       await channel.send({
-        content: `✅ ${member} verified`,
+        content: `✅ ${member} verified, an **admin** please check the profile to make sure!💗`,
         files: [attachment.url]
       });
     }
