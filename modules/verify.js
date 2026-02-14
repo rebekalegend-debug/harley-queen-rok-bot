@@ -60,7 +60,6 @@ function loadDatabase() {
 /* ================= OCR ================= */
 
 async function extractGovernorId(buffer) {
-  // Preprocess image for better OCR
   const processed = await sharp(buffer)
     .resize({ width: 1200 })
     .grayscale()
@@ -68,23 +67,21 @@ async function extractGovernorId(buffer) {
     .sharpen()
     .toBuffer();
 
-  const {
-    data: { text }
-  } = await Tesseract.recognize(processed, "eng", {
-    tessedit_char_whitelist: "0123456789IDid:"
-  });
+  const { data } = await Tesseract.recognize(processed, "eng");
 
-  // Clean OCR noise
-  const cleaned = text.replace(/[^0-9]/g, " ");
+  console.log("=== OCR RAW TEXT START ===");
+  console.log(data.text);
+  console.log("=== OCR RAW TEXT END ===");
 
-  // Find long number sequences (RoK IDs are usually 7–12 digits)
-  const match = cleaned.match(/\b\d{6,12}\b/);
+  const numbers = data.text.match(/\d{6,15}/g);
 
-  if (!match) return null;
+  if (!numbers) return null;
 
-  return match[0];
+  // pick the longest number (usually the Governor ID)
+  numbers.sort((a, b) => b.length - a.length);
+
+  return numbers[0];
 }
-
 /* ================= ICON CHECK ================= */
 
 async function iconCheck(imageBuffer) {
