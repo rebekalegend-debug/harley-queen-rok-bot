@@ -393,7 +393,7 @@ The image must be:
   client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
-  
+  const cfg = loadConfig(); // 🔥 ADD THIS HERE
 
   /* ================= DM MESSAGES ================= */
   if (!message.guild) {
