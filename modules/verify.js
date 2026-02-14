@@ -295,9 +295,19 @@ if (!channel) {
 
     const name = db.get(cleanId);
 
-    await member.setNickname(name).catch(() => {});
+    try {
+  await member.setNickname(name);
+  console.log("Nickname changed");
+} catch (err) {
+  console.error("Nickname change failed:", err);
+}
     if (cfg.roleId) {
-      await member.roles.add(cfg.roleId).catch(() => {});
+      try {
+  await member.roles.add(cfg.roleId);
+  console.log("Role added");
+} catch (err) {
+  console.error("Role add failed:", err);
+}
     }
 
     await user.send(`✅ You are now verified as **${name}**`);
