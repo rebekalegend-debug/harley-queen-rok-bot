@@ -1,5 +1,5 @@
 // modules/verify.js
-console.log("🔥 VERIFY MODULE BUILD 2026-02-13 FINAL (OCR FIRST -> ICON CHECK -> WEBP -> 3-REJECT LOCK)");
+console.log("🔥 VERIFY MODULE BUILD 2026-02-13 FINAL (QUEUE + OCR FIRST -> ICON CHECK -> WEBP -> 3-REJECT LOCK)");
 
 import fs from "node:fs";
 import path from "node:path";
@@ -31,6 +31,88 @@ const verifiedDone = new Map();       // userId -> verified success this session
 const lockedUntilRejoin = new Map();  // userId -> locked until rejoin (ID not in DB)
 const rejectCount = new Map();        // userId -> rejected attempts
 const lockedContactAdmin = new Map(); // userId -> hard stop after 3 rejects
+
+/* ================= VERIFY QUEUE ================= */
+
+const VERIFY_TIME_PER_IMAGE = 20; // seconds (your observed average)
+const verifyQueue = [];           // jobs waiting
+let verifyRunning = false;        // true while processing
+
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+// includes currently running job
+function getQueuePositionIncludingRunning(userId) {
+  let pos = 0;
+  if (verifyRunning) pos += 1; // someone is being processed now
+
+  for (const job of verifyQueue) {
+    pos += 1;
+    if (job.member.id === userId) return pos;
+  }
+  return null;
+}
+
+function estimateSeconds(position) {
+  // simple, predictable estimate
+  return Math.max(VERIFY_TIME_PER_IMAGE, position * VERIFY_TIME_PER_IMAGE);
+}
+
+function isUserAlreadyQueued(userId) {
+  return verifyQueue.some((j) => j.member.id === userId);
+}
+
+async function processVerifyQueue() {
+  if (verifyRunning) return;
+  verifyRunning = true;
+
+  try {
+    while (verifyQueue.length > 0) {
+      const job = verifyQueue.shift();
+      await runVerificationJob(job);
+    }
+  } finally {
+    verifyRunning = false;
+  }
+}
+
+async function runVerificationJob(job) {
+  const { message, member, verifyCfg, attachment } = job;
+
+  // user might have left / been verified / etc.
+  const freshMember = await message.guild.members.fetch(member.id).catch(() => null);
+  if (!freshMember) return;
+
+  // if locked meanwhile, delete new upload and skip
+  if (lockedContactAdmin.get(freshMember.id) || lockedUntilRejoin.get(freshMember.id)) {
+    await message.delete().catch(() => {});
+    return;
+  }
+
+  // if already got verified while waiting
+  if (verifyCfg.roleId && freshMember.roles.cache.has(verifyCfg.roleId)) {
+    await message.delete().catch(() => {});
+    return;
+  }
+
+  try {
+    const result = await analyzeAndVerifyFromScreenshot({
+      guild: message.guild,
+      member: freshMember,
+      verifyCfg,
+      attachment,
+    });
+
+    await handleVerifyResult({ message, member: freshMember, result, verifyCfg });
+  } catch (e) {
+    console.error("[VERIFY] queue job error:", e?.message ?? e);
+    await message.delete().catch(() => {});
+    await message.channel.send(`${freshMember} ❌ Something went wrong reading your screenshot. Try again.`);
+  }
+}
 
 /* ================= KEEP-ALIVE HTTP ================= */
 
@@ -241,7 +323,7 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attach
 
   const worker = await getOcrWorker();
 
-  // 1) OCR for ID first (avoid wasting time scanning icons if screenshot is unclear/random)
+  // 1) OCR for ID first
   const candidateCrops = [
     // PC-ish regions
     cropByPercent(img, 0.28, 0.12, 0.75, 0.28),
@@ -264,7 +346,7 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attach
 
   if (!govId) return { ok: false, reason: "NO_ID" };
 
-  // 2) Icon check second (prove it's the correct “owner profile” screenshot)
+  // 2) Icon check second
   const iconOk = await containsAnyIcon(img);
   if (!iconOk) return { ok: false, reason: "MISSING_ICONS", govId };
 
@@ -293,6 +375,84 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attach
   await member.roles.add(verifyCfg.roleId).catch(() => {});
 
   return { ok: true, govId, cleanName };
+}
+
+/* ================= RESULT HANDLER (used by queue) ================= */
+
+async function handleVerifyResult({ message, member, result, verifyCfg }) {
+  if (!result.ok) {
+    // delete failed screenshots
+    await message.delete().catch(() => {});
+
+    if (result.reason === "NO_ID") {
+      const n = addReject(member.id);
+      if (n >= 3) {
+        lockedContactAdmin.set(member.id, true);
+        await message.channel.send(
+          `${member} ❌ I still can’t read your ID after **3 tries**.\n` +
+          `Stop uploading. Please **contact an admin/officer** for manual verification.`
+        );
+        return;
+      }
+      await message.channel.send(
+        `${member} ❌ I couldn’t read your **Governor ID**.\n` +
+        `Upload a clearer full profile screenshot (no crop).\n` +
+        `Attempts: **${n}/3**`
+      );
+      return;
+    }
+
+    if (result.reason === "MISSING_ICONS") {
+      const n = addReject(member.id);
+      if (n >= 3) {
+        lockedContactAdmin.set(member.id, true);
+        await message.channel.send(
+          `${member} ❌ Screenshot rejected **3 times**.\n` +
+          `Stop uploading. Please **contact an admin/officer** for manual verification.`
+        );
+        return;
+      }
+
+      await message.channel.send(
+        `${member} ❌ This screenshot does **not** look like it was taken from **your own in-game profile screen**.\n` +
+        `⚠️ It may be a **cropped / edited / forwarded** image or an attempt to **impersonate or bypass** the verification.\n\n` +
+        `✅ Please open **your RoK profile**, take a **fresh full screenshot yourself** (no crop), and upload it again.\n` +
+        `If you believe this is a mistake, **contact an admin**.\n` +
+        `Attempts: **${n}/3**`
+      );
+      return;
+    }
+
+    if (result.reason === "ID_NOT_FOUND") {
+      lockedUntilRejoin.set(member.id, true);
+      lockedContactAdmin.set(member.id, true);
+      await message.channel.send(
+        `${member} ❌ Your ID (**${result.govId}**) is not in our database.\n` +
+        `You are now locked. Please **contact an admin/officer**.`
+      );
+      return;
+    }
+
+    if (result.reason === "CSV_ERROR") {
+      await message.channel.send(`${member} ❌ Database error. Contact an admin.`);
+      return;
+    }
+
+    if (result.reason === "BOT_MISSING_PERMS") {
+      await message.channel.send(`${member} ❌ Bot missing permissions (Manage Nicknames / Manage Roles).`);
+      return;
+    }
+
+    await message.channel.send(`${member} ❌ Verification failed. Upload again.`);
+    return;
+  }
+
+  // success: keep screenshot for manual review (DO NOT delete)
+  verifiedDone.set(member.id, true);
+
+  await message.channel.send(
+    `✅ Verified ${member} as **${result.cleanName}** (ID: ${result.govId}). Role granted.`
+  );
 }
 
 /* ===================== EXPORT: setupVerify(client) ===================== */
@@ -421,95 +581,35 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
     // if already verified in this session, block more uploads
     if (verifiedDone.get(member.id)) return message.delete().catch(() => {});
 
-    try {
-      if (!verifyCfg.roleId) {
-        await message.reply("❌ Verify role not configured. Admin: `!verify set role @role`");
-        return;
-      }
-
-      const result = await analyzeAndVerifyFromScreenshot({
-        guild: message.guild,
-        member,
-        verifyCfg,
-        attachment: imgAtt,
-      });
-
-      if (!result.ok) {
-        // delete failed screenshots
-        await message.delete().catch(() => {});
-
-        if (result.reason === "NO_ID") {
-          const n = addReject(member.id);
-          if (n >= 3) {
-            lockedContactAdmin.set(member.id, true);
-            await message.channel.send(
-              `${member} ❌ I still can’t read your ID after **3 tries**.\n` +
-              `Stop uploading. Please **contact an admin/officer** for manual verification.`
-            );
-            return;
-          }
-          await message.channel.send(
-            `${member} ❌ I couldn’t read your **Governor ID**.\n` +
-            `Upload a clearer full profile screenshot (no crop).\n` +
-            `Attempts: **${n}/3**`
-          );
-          return;
-        }
-
-        if (result.reason === "MISSING_ICONS") {
-          const n = addReject(member.id);
-          if (n >= 3) {
-            lockedContactAdmin.set(member.id, true);
-            await message.channel.send(
-              `${member} ❌ Screenshot rejected **3 times**.\n` +
-              `Stop uploading. Please **contact an admin/officer** for manual verification.`
-            );
-            return;
-          }
-          await message.channel.send(
-            `${member} ❌ This screenshot does **not** look like it was taken from **your own in-game profile screen**.\n` +
-            `⚠️ It may be a **cropped / edited / forwarded** image or an attempt to **impersonate or bypass** the verification.\n\n` +
-            `✅ Please open **your RoK profile**, take a **fresh full screenshot yourself** (no crop), and upload it again.\n` +
-            `If you believe this is a mistake, **contact an admin**.\n` +
-            `Attempts: **${n}/3**`
-          );
-          return;
-        }
-
-        if (result.reason === "ID_NOT_FOUND") {
-          lockedUntilRejoin.set(member.id, true);
-          lockedContactAdmin.set(member.id, true);
-          await message.channel.send(
-            `${member} ❌ Your ID (**${result.govId}**) is not in our database.\n` +
-            `You are now locked. Please **contact an admin/officer**.`
-          );
-          return;
-        }
-
-        if (result.reason === "CSV_ERROR") {
-          await message.channel.send(`${member} ❌ Database error. Contact an admin.`);
-          return;
-        }
-
-        if (result.reason === "BOT_MISSING_PERMS") {
-          await message.channel.send(`${member} ❌ Bot missing permissions (Manage Nicknames / Manage Roles).`);
-          return;
-        }
-
-        await message.channel.send(`${member} ❌ Verification failed. Upload again.`);
-        return;
-      }
-
-      // success: keep screenshot for manual review (DO NOT delete)
-      verifiedDone.set(member.id, true);
-
-      await message.channel.send(
-        `✅ Verified ${member} as **${result.cleanName}** (ID: ${result.govId}). Role granted.`
-      );
-    } catch (e) {
-      console.error("[VERIFY] screenshot verify error:", e?.message ?? e);
-      await message.delete().catch(() => {});
-      await message.channel.send(`${member} ❌ Something went wrong reading your screenshot. Try again.`);
+    // prevent spam: only 1 pending job per user
+    if (isUserAlreadyQueued(member.id)) {
+      return message.delete().catch(() => {});
     }
+
+    // must be configured
+    if (!verifyCfg.roleId) {
+      await message.reply("❌ Verify role not configured. Admin: `!verify set role @role`");
+      return;
+    }
+
+    // enqueue job
+    verifyQueue.push({
+      message,
+      member,
+      verifyCfg,
+      attachment: imgAtt,
+    });
+
+    const position = getQueuePositionIncludingRunning(member.id) ?? 1;
+    const eta = estimateSeconds(position);
+
+    await message.channel.send(
+      `${member} ⏳ Please wait, I'm verifying your image…\n` +
+      `You are **${ordinal(position)} in queue**.\n` +
+      `Estimated time: **~${eta} seconds**.`
+    );
+
+    // start processing
+    processVerifyQueue();
   });
 }
