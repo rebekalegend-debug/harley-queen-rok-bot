@@ -420,7 +420,18 @@ The image must be:
 
     // If DM contains image → verification flow
     if (message.attachments.size > 0) {
-      const guild = client.guilds.cache.first();
+      let guild = null;
+
+for (const g of client.guilds.cache.values()) {
+  try {
+    const member = await g.members.fetch(message.author.id);
+    if (member) {
+      guild = g;
+      break;
+    }
+  } catch {}
+}
+
       if (!guild) return;
 
       const member = await guild.members.fetch(message.author.id).catch(() => null);
