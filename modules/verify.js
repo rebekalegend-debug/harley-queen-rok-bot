@@ -115,7 +115,7 @@ const id = idMatch[1].replace(/\D/g, "");
 
       if (db.has(sub)) {
         console.log("Matched DB ID from substring:", sub);
-        console.log("DB has extracted ID?", db.has(id));
+        
         return sub;
       }
     }
@@ -205,14 +205,19 @@ async function iconCheck(imageBuffer) {
 
 async function processQueue(client) {
   if (processing) return;
+
   processing = true;
-
-  while (queue.length > 0) {
-    const job = queue.shift();
-    await handleVerification(client, job);
+console.log("Queue length:", queue.length);
+  try {
+    while (queue.length > 0) {
+      const job = queue.shift();
+      await handleVerification(client, job);
+    }
+  } catch (err) {
+    console.error("Queue error:", err);
+  } finally {
+    processing = false;
   }
-
-  processing = false;
 }
 
 /* ================= CORE VERIFY ================= */
@@ -221,7 +226,7 @@ async function handleVerification(client, { member, attachment }) {
   const cfg = loadConfig();
  console.log("Checking ID:", cleanId);
 console.log("DB contains ID?", db.has(cleanId));
-
+console.log("Starting verification for:", member.user.id);
   const db = loadDatabase();
 
   const user = member.user;
