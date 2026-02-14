@@ -253,24 +253,30 @@ export function setupVerify(client) {
       return message.reply("✅ This channel set as verify log.");
     }
 
-    /* DM IMAGE HANDLER */
-    if (!message.guild && message.attachments.size > 0) {
-      const member = [...client.guilds.cache.values()][0].members.cache.get(message.author.id);
-      if (!member) return;
+/* DM IMAGE HANDLER */
+if (!message.guild && message.attachments.size > 0) {
+  const guild = client.guilds.cache.first();
+  if (!guild) return;
 
-      const position = queue.length;
-      const waitTime = position * PROCESS_TIME;
+  const member = await guild.members.fetch(message.author.id).catch(() => null);
+  if (!member) {
+    console.log("Member not found in guild");
+    return;
+  }
 
-      await message.author.send(
-        `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
-      );
+  const position = queue.length;
+  const waitTime = position * PROCESS_TIME;
 
-      queue.push({
-        member,
-        attachment: message.attachments.first()
-      });
+  await message.author.send(
+    `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
+  );
 
-      processQueue(client);
-    }
+  queue.push({
+    member,
+    attachment: message.attachments.first()
+  });
+
+  processQueue(client);
+}
   });
 }
