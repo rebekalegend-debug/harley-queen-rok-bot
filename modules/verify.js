@@ -40,7 +40,7 @@ function loadConfig() {
   try {
     return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
   } catch {
-    return { verifyChannel: null, roleId: null };
+    return { verifyChannel: null, roleId: null, locked: [] };
   }
 }
 
@@ -223,10 +223,16 @@ async function handleVerification(client, { member, attachment }) {
 lockedUsers.add(user.id);
 
 const cfg = loadConfig();
+
+if (!cfg.locked) cfg.locked = [];
+
 if (!cfg.locked.includes(user.id)) {
   cfg.locked.push(user.id);
   saveConfig(cfg);
 }
+
+console.log("User permanently locked:", user.id);
+
 
       if (!cfg.verifyChannel) {
   console.log("⚠️ Verify channel not set.");
