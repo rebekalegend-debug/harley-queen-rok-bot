@@ -1,5 +1,5 @@
 // modules/verify.js
-console.log("🔥 VERIFY MODULE BUILD 2026-02-13 FINAL (QUEUE + OCR FIRST -> ICON CHECK -> WEBP -> 3-REJECT LOCK + DM)");
+console.log("🔥 VERIFY MODULE BUILD 2026-02-13 FINAL (QUEUE + OCR FIRST -> ICON CHECK -> WEBP -> 3-REJECT LOCK)");
 
 import fs from "node:fs";
 import path from "node:path";
@@ -33,7 +33,7 @@ const rejectCount = new Map();        // userId -> rejected attempts
 const lockedContactAdmin = new Map(); // userId -> hard stop after 3 rejects
 
 /* ================= DM HELPER ================= */
-// Sends to DM. If user has DMs off, fallback to channel mention.
+// Send to DM; if user has DMs closed, fallback to channel mention.
 async function sendUser(member, channel, text) {
   try {
     await member.send(text);
@@ -67,6 +67,7 @@ function getQueuePositionIncludingRunning(userId) {
 }
 
 function estimateSeconds(position) {
+  // simple, predictable estimate
   return Math.max(VERIFY_TIME_PER_IMAGE, position * VERIFY_TIME_PER_IMAGE);
 }
 
@@ -375,10 +376,7 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attach
 
   // perms
   const me = await guild.members.fetchMe();
-  if (
-    !me.permissions.has(PermissionFlagsBits.ManageNicknames) ||
-    !me.permissions.has(PermissionFlagsBits.ManageRoles)
-  ) {
+  if (!me.permissions.has(PermissionFlagsBits.ManageNicknames) || !me.permissions.has(PermissionFlagsBits.ManageRoles)) {
     return { ok: false, reason: "BOT_MISSING_PERMS" };
   }
 
@@ -389,32 +387,27 @@ async function analyzeAndVerifyFromScreenshot({ guild, member, verifyCfg, attach
   return { ok: true, govId, cleanName };
 }
 
-/* ================= RESULT HANDLER (DM for fails, channel for success) ================= */
+/* ================= RESULT HANDLER (used by queue) ================= */
 
 async function handleVerifyResult({ message, member, result, verifyCfg }) {
-  const ch = message.channel;
-
   if (!result.ok) {
     // delete failed screenshots
     await message.delete().catch(() => {});
 
     if (result.reason === "NO_ID") {
       const n = addReject(member.id);
-
       if (n >= 3) {
         lockedContactAdmin.set(member.id, true);
         await sendUser(
           member,
-          ch,
+          message.channel,
           `❌ I still can’t read your ID after **3 tries**.\nStop uploading. Please **contact an admin/officer** for manual verification.`
         );
         return;
       }
-
-      // YOUR ORIGINAL MESSAGE STYLE (not my replacement)
       await sendUser(
         member,
-        ch,
+        message.channel,
         `❌ I couldn’t read your **Governor ID**.\nUpload a clearer full profile screenshot (no crop).\nAttempts: **${n}/3**`
       );
       return;
@@ -422,21 +415,19 @@ async function handleVerifyResult({ message, member, result, verifyCfg }) {
 
     if (result.reason === "MISSING_ICONS") {
       const n = addReject(member.id);
-
       if (n >= 3) {
         lockedContactAdmin.set(member.id, true);
         await sendUser(
           member,
-          ch,
+          message.channel,
           `❌ Screenshot rejected **3 times**.\nStop uploading. Please **contact an admin/officer** for manual verification.`
         );
         return;
       }
 
-      // YOUR MESSAGE (impersonation/bypass warning)
       await sendUser(
         member,
-        ch,
+        message.channel,
         `❌ This screenshot does **not** look like it was taken from **your own in-game profile screen**.\n` +
           `⚠️ It may be a **cropped / edited / forwarded** image or an attempt to **impersonate or bypass** the verification.\n\n` +
           `✅ Please open **your RoK profile**, take a **fresh full screenshot yourself** (no crop), and upload it again.\n` +
@@ -449,34 +440,35 @@ async function handleVerifyResult({ message, member, result, verifyCfg }) {
     if (result.reason === "ID_NOT_FOUND") {
       lockedUntilRejoin.set(member.id, true);
       lockedContactAdmin.set(member.id, true);
-
       await sendUser(
         member,
-        ch,
+        message.channel,
         `❌ Your ID (**${result.govId}**) is not in our database.\nYou are now locked. Please **contact an admin/officer**.`
       );
       return;
     }
 
     if (result.reason === "CSV_ERROR") {
-      await sendUser(member, ch, `❌ Database error. Contact an admin.`);
+      await sendUser(member, message.channel, `${member} ❌ Database error. Contact an admin.`);
       return;
     }
 
     if (result.reason === "BOT_MISSING_PERMS") {
-      await sendUser(member, ch, `❌ Bot missing permissions (Manage Nicknames / Manage Roles).`);
+      await sendUser(member, message.channel, `${member} ❌ Bot missing permissions (Manage Nicknames / Manage Roles).`);
       return;
     }
 
-    await sendUser(member, ch, `❌ Verification failed. Upload again.`);
+    await sendUser(member, message.channel, `${member} ❌ Verification failed. Upload again.`);
     return;
   }
 
   // success: keep screenshot for manual review (DO NOT delete)
   verifiedDone.set(member.id, true);
 
-  // success message stays in channel
-  await ch.send(`✅ Verified ${member} as **${result.cleanName}** (ID: ${result.govId}). Role granted.`);
+  // ✅ keep success message in channel (you wanted this)
+  await message.channel.send(
+    `✅ Verified ${member} as **${result.cleanName}** (ID: ${result.govId}). Role granted.`
+  );
 }
 
 /* ===================== EXPORT: setupVerify(client) ===================== */
@@ -488,7 +480,7 @@ export function setupVerify(client) {
     console.log(`✅ [VERIFY] Logged in as ${client.user.tag}`);
   });
 
-  // MEMBER JOIN (unchanged: welcome in channel)
+  // MEMBER JOIN
   client.on(Events.GuildMemberAdd, async (member) => {
     const cfg = getGuild(member.guild.id).verify;
     if (!cfg?.channelId) return;
@@ -514,7 +506,7 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
   client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
 
-    // DM auto reply (unchanged)
+    // DM auto reply
     if (!message.guild) {
       if (message.author.id === HARLEY_QUINN_USER_ID) return;
       return message
@@ -525,7 +517,7 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
     const guildId = message.guild.id;
     const verifyCfg = getGuild(guildId).verify || {};
 
-    // VERIFY ADMIN COMMANDS (unchanged)
+    // VERIFY ADMIN COMMANDS
     if (message.content.startsWith("!verify")) {
       const args = message.content.split(/\s+/);
       const sub = (args[1] || "help").toLowerCase();
@@ -629,11 +621,13 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
 
     const etaText = eta >= 60 ? `~${Math.ceil(eta / 60)} min` : `~${eta} sec`;
 
-    // QUEUE MESSAGE -> DM (fallback to channel if DM closed)
+    // ✅ Queue message -> DM (fallback to channel if DM is closed)
     await sendUser(
       member,
       message.channel,
-      `⏳ Please wait, I'm verifying your image…\nYou are **${ordinal(position)} in queue**.\nEstimated time: **${etaText}**.`
+      `⏳ Please wait, I'm verifying your image…\n` +
+      `You are **${ordinal(position)} in queue**.\n` +
+      `Estimated time: **${etaText}**.`
     );
 
     // start processing
