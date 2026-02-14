@@ -32,16 +32,6 @@ const lockedUntilRejoin = new Map();  // userId -> locked until rejoin (ID not i
 const rejectCount = new Map();        // userId -> rejected attempts
 const lockedContactAdmin = new Map(); // userId -> hard stop after 3 rejects
 
-/* ================= DM HELPER ================= */
-// Send to DM; if user has DMs closed, fallback to channel mention.
-async function sendUser(member, channel, text) {
-  try {
-    await member.send(text);
-  } catch {
-    await channel.send(`${member} ${text}`).catch(() => {});
-  }
-}
-
 /* ================= VERIFY QUEUE ================= */
 
 const VERIFY_TIME_PER_IMAGE = 20; // seconds (your observed average)
@@ -120,7 +110,7 @@ async function runVerificationJob(job) {
   } catch (e) {
     console.error("[VERIFY] queue job error:", e?.message ?? e);
     await message.delete().catch(() => {});
-    await sendUser(freshMember, message.channel, "❌ Something went wrong reading your screenshot. Try again.");
+    await message.channel.send(`${freshMember} ❌ Something went wrong reading your screenshot. Try again.`);
   }
 }
 
@@ -398,17 +388,16 @@ async function handleVerifyResult({ message, member, result, verifyCfg }) {
       const n = addReject(member.id);
       if (n >= 3) {
         lockedContactAdmin.set(member.id, true);
-        await sendUser(
-          member,
-          message.channel,
-          `❌ I still can’t read your ID after **3 tries**.\nStop uploading. Please **contact an admin/officer** for manual verification.`
+        await message.channel.send(
+          `${member} ❌ I still can’t read your ID after **3 tries**.\n` +
+          `Stop uploading. Please **contact an admin/officer** for manual verification.`
         );
         return;
       }
-      await sendUser(
-        member,
-        message.channel,
-        `❌ I couldn’t read your **Governor ID**.\nUpload a clearer full profile screenshot (no crop).\nAttempts: **${n}/3**`
+      await message.channel.send(
+        `${member} ❌ I couldn’t read your **Governor ID**.\n` +
+        `Upload a clearer full profile screenshot (no crop).\n` +
+        `Attempts: **${n}/3**`
       );
       return;
     }
@@ -417,22 +406,19 @@ async function handleVerifyResult({ message, member, result, verifyCfg }) {
       const n = addReject(member.id);
       if (n >= 3) {
         lockedContactAdmin.set(member.id, true);
-        await sendUser(
-          member,
-          message.channel,
-          `❌ Screenshot rejected **3 times**.\nStop uploading. Please **contact an admin/officer** for manual verification.`
+        await message.channel.send(
+          `${member} ❌ Screenshot rejected **3 times**.\n` +
+          `Stop uploading. Please **contact an admin/officer** for manual verification.`
         );
         return;
       }
 
-      await sendUser(
-        member,
-        message.channel,
-        `❌ This screenshot does **not** look like it was taken from **your own in-game profile screen**.\n` +
-          `⚠️ It may be a **cropped / edited / forwarded** image or an attempt to **impersonate or bypass** the verification.\n\n` +
-          `✅ Please open **your RoK profile**, take a **fresh full screenshot yourself** (no crop), and upload it again.\n` +
-          `If you believe this is a mistake, **contact an admin**.\n` +
-          `Attempts: **${n}/3**`
+      await message.channel.send(
+        `${member} ❌ This screenshot does **not** look like it was taken from **your own in-game profile screen**.\n` +
+        `⚠️ It may be a **cropped / edited / forwarded** image or an attempt to **impersonate or bypass** the verification.\n\n` +
+        `✅ Please open **your RoK profile**, take a **fresh full screenshot yourself** (no crop), and upload it again.\n` +
+        `If you believe this is a mistake, **contact an admin**.\n` +
+        `Attempts: **${n}/3**`
       );
       return;
     }
@@ -440,32 +426,30 @@ async function handleVerifyResult({ message, member, result, verifyCfg }) {
     if (result.reason === "ID_NOT_FOUND") {
       lockedUntilRejoin.set(member.id, true);
       lockedContactAdmin.set(member.id, true);
-      await sendUser(
-        member,
-        message.channel,
-        `❌ Your ID (**${result.govId}**) is not in our database.\nYou are now locked. Please **contact an admin/officer**.`
+      await message.channel.send(
+        `${member} ❌ Your ID (**${result.govId}**) is not in our database.\n` +
+        `You are now locked. Please **contact an admin/officer**.`
       );
       return;
     }
 
     if (result.reason === "CSV_ERROR") {
-      await sendUser(member, message.channel, `${member} ❌ Database error. Contact an admin.`);
+      await message.channel.send(`${member} ❌ Database error. Contact an admin.`);
       return;
     }
 
     if (result.reason === "BOT_MISSING_PERMS") {
-      await sendUser(member, message.channel, `${member} ❌ Bot missing permissions (Manage Nicknames / Manage Roles).`);
+      await message.channel.send(`${member} ❌ Bot missing permissions (Manage Nicknames / Manage Roles).`);
       return;
     }
 
-    await sendUser(member, message.channel, `${member} ❌ Verification failed. Upload again.`);
+    await message.channel.send(`${member} ❌ Verification failed. Upload again.`);
     return;
   }
 
   // success: keep screenshot for manual review (DO NOT delete)
   verifiedDone.set(member.id, true);
 
-  // ✅ keep success message in channel (you wanted this)
   await message.channel.send(
     `✅ Verified ${member} as **${result.cleanName}** (ID: ${result.govId}). Role granted.`
   );
@@ -619,15 +603,10 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
     const position = getQueuePositionIncludingRunning(member.id) ?? 1;
     const eta = estimateSeconds(position);
 
-    const etaText = eta >= 60 ? `~${Math.ceil(eta / 60)} min` : `~${eta} sec`;
-
-    // ✅ Queue message -> DM (fallback to channel if DM is closed)
-    await sendUser(
-      member,
-      message.channel,
-      `⏳ Please wait, I'm verifying your image…\n` +
+    await message.channel.send(
+      `${member} ⏳ Please wait, I'm verifying your image…\n` +
       `You are **${ordinal(position)} in queue**.\n` +
-      `Estimated time: **${etaText}**.`
+      `Estimated time: **~${eta} seconds**.`
     );
 
     // start processing
