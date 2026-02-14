@@ -60,13 +60,29 @@ function loadDatabase() {
 /* ================= OCR ================= */
 
 async function extractGovernorId(buffer) {
+  // Preprocess image for better OCR
+  const processed = await sharp(buffer)
+    .resize({ width: 1200 })
+    .grayscale()
+    .normalize()
+    .sharpen()
+    .toBuffer();
+
   const {
     data: { text }
-  } = await Tesseract.recognize(buffer, "eng");
+  } = await Tesseract.recognize(processed, "eng", {
+    tessedit_char_whitelist: "0123456789IDid:"
+  });
 
-  const match = text.match(/ID[:\s]*([0-9]{6,12})/i);
+  // Clean OCR noise
+  const cleaned = text.replace(/[^0-9]/g, " ");
+
+  // Find long number sequences (RoK IDs are usually 7–12 digits)
+  const match = cleaned.match(/\b\d{6,12}\b/);
+
   if (!match) return null;
-  return match[1];
+
+  return match[0];
 }
 
 /* ================= ICON CHECK ================= */
