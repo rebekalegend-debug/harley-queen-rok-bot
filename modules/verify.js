@@ -83,13 +83,11 @@ async function extractGovernorId(buffer, db) {
   const idMatch = data.text.match(/ID[:\s]*([0-9]{6,9})/i);
 
   if (idMatch) {
-    const id = idMatch[1];
-    console.log("Matched ID from pattern:", id);
+  const id = idMatch[1].trim();
+  console.log("Matched ID from pattern:", id);
+  return id;
+}
 
-    if (db.has(id)) {
-      return id;
-    }
-  }
 
   const cleaned = data.text.replace(/\D/g, "");
 
@@ -100,6 +98,7 @@ async function extractGovernorId(buffer, db) {
 
       if (db.has(sub)) {
         console.log("Matched DB ID from substring:", sub);
+        console.log("DB has extracted ID?", db.has(id));
         return sub;
       }
     }
