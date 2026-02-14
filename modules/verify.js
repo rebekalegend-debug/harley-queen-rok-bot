@@ -82,22 +82,21 @@ async function extractGovernorId(buffer, db) {
 
   const cleaned = data.text.replace(/\D/g, "");
 
-  console.log("Cleaned digits:", cleaned);
+  const candidates = cleaned.match(/\d{6,10}/g);
+  if (!candidates) return null;
 
-  for (let len = 6; len <= 9; len++) {
-    for (let i = 0; i <= cleaned.length - len; i++) {
+  console.log("Candidates found:", candidates);
 
-      const sub = cleaned.substring(i, i + len);
-
-      if (db.has(sub)) {
-        console.log("Matched DB ID:", sub);
-        return sub;
-      }
+  for (const num of candidates) {
+    if (db.has(num)) {
+      console.log("Matched DB ID:", num);
+      return num;
     }
   }
 
   return null;
 }
+
 
 
 /* ================= ICON CHECK ================= */
