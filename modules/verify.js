@@ -419,47 +419,42 @@ The image must be:
       return;
     }
 
-    // If DM contains image → verification flow
-    if (message.attachments.size > 0) {
-     const guildId = pendingGuild.get(message.author.id);
-if (!guildId) {
-  console.log("No pending guild found for user:", message.author.id);
+  // If DM contains image → verification flow
+if (message.attachments.size > 0) {
+
+  const guildId = pendingGuild.get(message.author.id);
+  if (!guildId) {
+    console.log("No pending guild found for user:", message.author.id);
+    return;
+  }
+
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) {
+    console.log("Guild not found:", guildId);
+    return;
+  }
+
+  const guildMember = await guild.members.fetch(message.author.id).catch(() => null);
+  if (!guildMember) {
+    console.log("Member not found in guild:", guildId);
+    return;
+  }
+
+  const position = queue.length;
+  const waitTime = position * PROCESS_TIME;
+
+  await message.channel.send(
+    `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
+  );
+
+  queue.push({
+    member: guildMember,
+    attachment: message.attachments.first()
+  });
+
+  processQueue(client);
   return;
 }
-
-const guild = client.guilds.cache.get(guildId);
-if (!guild) {
-  console.log("Guild not found:", guildId);
-  return;
-}
-
-const member = await guild.members.fetch(message.author.id).catch(() => null);
-if (!member) {
-  console.log("Member not found in guild:", guildId);
-  return;
-}
-
-
-      if (!guild) return;
-
-      const member = await guild.members.fetch(message.author.id).catch(() => null);
-      if (!member) return;
-
-      const position = queue.length;
-      const waitTime = position * PROCESS_TIME;
-
-      await message.channel.send(
-        `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
-      );
-
-      queue.push({
-        member,
-        attachment: message.attachments.first()
-      });
-
-      processQueue(client);
-      return;
-    }
 
     // If DM text but not image → ignore (or you can reply if you want)
     return;
