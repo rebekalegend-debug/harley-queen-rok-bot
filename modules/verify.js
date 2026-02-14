@@ -227,20 +227,22 @@ async function processQueue(client) {
 
 async function handleVerification(client, { member, attachment }) {
   const cfg = loadConfig();
- 
-console.log("DB contains ID?", db.has(cleanId));
-console.log("Starting verification for:", member.user.id);
   const db = loadDatabase();
 
   const user = member.user;
 
   try {
+    console.log("Starting verification for:", member.user.id);
+
     const response = await fetch(attachment.url);
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
     const governorId = await extractGovernorId(buffer, db);
     const cleanId = governorId ? governorId.replace(/\D/g, "") : null;
+
+    console.log("Extracted ID:", cleanId);
+    console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
 
     if (!cleanId) {
       return rejectUser(user, member, 1, null);
