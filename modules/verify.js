@@ -292,7 +292,6 @@ async function rejectUser(user, member, type) {
 /* ================= MAIN EXPORT ================= */
 
 export function setupVerify(client) {
-  const cfg = loadConfig();
 
   client.on(Events.GuildMemberAdd, async (member) => {
     try {
@@ -302,29 +301,26 @@ export function setupVerify(client) {
     } catch {}
   });
 
- client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot) return;
+  client.on(Events.MessageCreate, async (message) => {
+    if (message.author.bot) return;
 
-  const cfg = loadConfig();
+    const cfg = loadConfig();
 
-  /* 🔒 LOCKED USER AUTO REPLY (DM ONLY) */
-  if (!message.guild) {
-if (lockedUsers.has(message.author.id)) {
+    /* 🔒 LOCKED USER AUTO REPLY */
+    if (lockedUsers.has(message.author.id)) {
 
-  // Do NOT interfere during active verification image upload
-  if (!message.guild && message.attachments.size > 0) {
-    return;
-  }
+      if (!message.guild && message.attachments.size > 0) {
+        return;
+      }
 
-  await message.reply(
+      await message.reply(
 `I'm just a bot, please reach out to <@297057337590546434>
 
 harley id:297057337590546434`
-  );
+      );
 
-  return;
-}
-
+      return;
+    }
 
     /* CLEAN VERIFY CHANNEL */
     if (message.channel.id === cfg.verifyChannel && message.guild) {
@@ -356,30 +352,29 @@ harley id:297057337590546434`
       return message.reply("✅ This channel set as verify log.");
     }
 
-/* DM IMAGE HANDLER */
-if (!message.guild && message.attachments.size > 0) {
-  const guild = client.guilds.cache.first();
-  if (!guild) return;
+    /* DM IMAGE HANDLER */
+    if (!message.guild && message.attachments.size > 0) {
+      const guild = client.guilds.cache.first();
+      if (!guild) return;
 
-  const member = await guild.members.fetch(message.author.id).catch(() => null);
-  if (!member) {
-    console.log("Member not found in guild");
-    return;
-  }
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member) return;
 
-  const position = queue.length;
-  const waitTime = position * PROCESS_TIME;
+      const position = queue.length;
+      const waitTime = position * PROCESS_TIME;
 
-  await message.author.send(
-    `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
-  );
+      await message.author.send(
+        `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
+      );
 
-  queue.push({
-    member,
-    attachment: message.attachments.first()
-  });
+      queue.push({
+        member,
+        attachment: message.attachments.first()
+      });
 
-  processQueue(client);
-}
-  });
-}
+      processQueue(client);
+    }
+
+  }); // ← closes MessageCreate
+
+} // ← closes setupVerify
