@@ -34,7 +34,12 @@ const lockedContactAdmin = new Map(); // userId -> hard stop after 3 rejects
 
 /* ================= VERIFY QUEUE ================= */
 
-const VERIFY_TIME_PER_IMAGE = 20; // seconds (your observed average)
+// fallback estimate until we have real measurements
+let avgVerifySeconds = 30;          // start a bit safe for Railway
+const AVG_MIN = 15;                 // don’t go lower than this
+const AVG_MAX = 120;                // don’t go crazy high
+const SMOOTHING = 0.30;             // 0.30 = reacts fast, 0.10 = reacts slow
+
 const verifyQueue = [];           // jobs waiting
 let verifyRunning = false;        // true while processing
 
@@ -57,9 +62,10 @@ function getQueuePositionIncludingRunning(userId) {
 }
 
 function estimateSeconds(position) {
-  // simple, predictable estimate
-  return Math.max(VERIFY_TIME_PER_IMAGE, position * VERIFY_TIME_PER_IMAGE);
+  const per = Math.min(AVG_MAX, Math.max(AVG_MIN, avgVerifySeconds));
+  return Math.round(position * per);
 }
+
 
 function isUserAlreadyQueued(userId) {
   return verifyQueue.some((j) => j.member.id === userId);
@@ -98,6 +104,9 @@ async function runVerificationJob(job) {
     return;
   }
 
+  // ⬇️ START TIMER HERE
+  const started = Date.now();
+
   try {
     const result = await analyzeAndVerifyFromScreenshot({
       guild: message.guild,
@@ -107,12 +116,28 @@ async function runVerificationJob(job) {
     });
 
     await handleVerifyResult({ message, member: freshMember, result, verifyCfg });
+
   } catch (e) {
     console.error("[VERIFY] queue job error:", e?.message ?? e);
     await message.delete().catch(() => {});
     await message.channel.send(`${freshMember} ❌ Something went wrong reading your screenshot. Try again.`);
+
+  } finally {
+    // ⬇️ CALCULATE REAL TIME
+    const seconds = Math.max(1, Math.round((Date.now() - started) / 1000));
+
+    // update rolling average
+    avgVerifySeconds =
+      (1 - SMOOTHING) * avgVerifySeconds +
+      SMOOTHING * seconds;
+
+    // clamp for safety
+    avgVerifySeconds = Math.min(AVG_MAX, Math.max(AVG_MIN, avgVerifySeconds));
+
+    console.log(`[VERIFY] job time=${seconds}s, avg=${avgVerifySeconds.toFixed(1)}s`);
   }
 }
+
 
 /* ================= KEEP-ALIVE HTTP ================= */
 
@@ -603,13 +628,18 @@ Please upload a screenshot of your **Rise of Kingdoms profile** here.
     });
 
     const position = getQueuePositionIncludingRunning(member.id) ?? 1;
-    const eta = estimateSeconds(position);
+const eta = estimateSeconds(position);
 
-    await message.channel.send(
-      `${member} ⏳ Please wait, I'm verifying your image…\n` +
-      `You are **${ordinal(position)} in queue**.\n` +
-      `Estimated time: **~${eta} seconds**.`
-    );
+const etaText = eta >= 60
+  ? `~${Math.ceil(eta / 60)} min`
+  : `~${eta} sec`;
+
+await message.channel.send(
+  `${member} ⏳ Please wait, I'm verifying your image…\n` +
+  `You are **${ordinal(position)} in queue**.\n` +
+  `Estimated time: **${etaText}**.`
+);
+
 
     // start processing
     processVerifyQueue();
