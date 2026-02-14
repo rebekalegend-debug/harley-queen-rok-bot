@@ -392,7 +392,44 @@ Thank you.`
   if (message.channel.id === cfg.verifyChannel) {
     await message.delete().catch(() => {});
   }
+ 
+    // unlock an locked user
+if (message.content.startsWith("!verify unlock")) {
+  if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
+  const user = message.mentions.users.first();
+  if (!user) return message.reply("Mention a user to unlock.");
+
+  const cfg = loadConfig();
+
+  lockedUsers.delete(user.id);
+
+  if (cfg.locked) {
+    cfg.locked = cfg.locked.filter(id => id !== user.id);
+    saveConfig(cfg);
+  }
+
+  return message.reply(`✅ ${user.tag} has been unlocked.`);
+}
+
+  //list locked users
+if (message.content === "!verify locked") {
+  if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+  const cfg = loadConfig();
+  const list = cfg.locked || [];
+
+  if (list.length === 0) return message.reply("No locked users.");
+
+  return message.reply(
+    "🔒 Locked Users:\n" + list.map(id => `<@${id}>`).join("\n")
+  );
+}
+
+
+
+    
+    
   // Admin commands
   if (message.content.startsWith("!verify set role")) {
     if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
