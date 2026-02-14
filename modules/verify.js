@@ -99,55 +99,75 @@ async function extractGovernorId(buffer) {
 /* ================= ICON CHECK ================= */
 
 async function iconCheck(imageBuffer) {
-  const screenshot = await sharp(imageBuffer)
-    .resize({ width: 800 })
+  console.log("🔎 Checking for edit icon...");
+
+  const image = sharp(imageBuffer);
+  const metadata = await image.metadata();
+
+  const width = metadata.width;
+  const height = metadata.height;
+
+  // Crop LEFT PROFILE PANEL ONLY
+  const profilePanel = await image
+    .extract({
+      left: 0,
+      top: 0,
+      width: Math.floor(width * 0.45),
+      height: Math.floor(height * 0.55)
+    })
     .grayscale()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
-  for (const iconPath of ICONS) {
-    if (!fs.existsSync(iconPath)) continue;
+  const icon = await sharp(ICONS[0]) // your 1.png
+    .resize({ width: 28 }) // realistic size
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
 
-    const icon = await sharp(iconPath)
-      .resize({ width: 80 })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
+  const sData = profilePanel.data;
+  const iData = icon.data;
 
-    const sData = screenshot.data;
-    const iData = icon.data;
+  const sWidth = profilePanel.info.width;
+  const sHeight = profilePanel.info.height;
+  const iWidth = icon.info.width;
+  const iHeight = icon.info.height;
 
-    const sWidth = screenshot.info.width;
-    const sHeight = screenshot.info.height;
-    const iWidth = icon.info.width;
-    const iHeight = icon.info.height;
+  let bestSimilarity = 0;
 
-    for (let y = 0; y < sHeight - iHeight; y += 5) {
-      for (let x = 0; x < sWidth - iWidth; x += 5) {
+  for (let y = 0; y < sHeight - iHeight; y += 3) {
+    for (let x = 0; x < sWidth - iWidth; x += 3) {
 
-        let matchScore = 0;
-        let total = iWidth * iHeight;
+      let matchScore = 0;
+      let total = iWidth * iHeight;
 
-        for (let iy = 0; iy < iHeight; iy++) {
-          for (let ix = 0; ix < iWidth; ix++) {
-            const sIndex = ((y + iy) * sWidth + (x + ix));
-            const iIndex = (iy * iWidth + ix);
+      for (let iy = 0; iy < iHeight; iy++) {
+        for (let ix = 0; ix < iWidth; ix++) {
 
-            if (Math.abs(sData[sIndex] - iData[iIndex]) < 15) {
-              matchScore++;
-            }
+          const sIndex = ((y + iy) * sWidth + (x + ix));
+          const iIndex = (iy * iWidth + ix);
+
+          if (Math.abs(sData[sIndex] - iData[iIndex]) < 25) {
+            matchScore++;
           }
         }
+      }
 
-        const similarity = matchScore / total;
+      const similarity = matchScore / total;
 
-        if (similarity > 0.70) {
-          return true;
-        }
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+      }
+
+      if (similarity > 0.65) {
+        console.log("✅ ICON FOUND. Similarity:", similarity);
+        return true;
       }
     }
   }
 
+  console.log("Best similarity:", bestSimilarity);
+  console.log("❌ Icon not detected.");
   return false;
 }
 
