@@ -302,58 +302,25 @@ export function setupVerify(client) {
   });
 
   client.on(Events.MessageCreate, async (message) => {
-    if (message.author.bot) return;
+  if (message.author.bot) return;
 
-    const cfg = loadConfig();
+  const cfg = loadConfig();
 
-    /* 🔒 LOCKED USER AUTO REPLY */
+  /* ================= DM MESSAGES ================= */
+  if (!message.guild) {
+
+    // If user is locked → always reply
     if (lockedUsers.has(message.author.id)) {
-
-      if (!message.guild && message.attachments.size > 0) {
-        return;
-      }
-
-      await message.reply(
+      await message.channel.send(
 `I'm just a bot, please reach out to <@297057337590546434>
 
 harley id:297057337590546434`
       );
-
       return;
     }
 
-    /* CLEAN VERIFY CHANNEL */
-    if (message.channel.id === cfg.verifyChannel && message.guild) {
-      await message.delete().catch(() => {});
-    }
-
-    /* ADMIN COMMANDS */
-    if (message.content.startsWith("!verify set role")) {
-      if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-      const role = message.mentions.roles.first();
-      if (!role) return message.reply("Mention a role.");
-      cfg.roleId = role.id;
-      saveConfig(cfg);
-      return message.reply("✅ Verify role set.");
-    }
-
-    if (message.content === "!verify status") {
-      return message.reply(
-        `Verify Channel: ${cfg.verifyChannel || "Not set"}\nRole: ${
-          cfg.roleId ? `<@&${cfg.roleId}>` : "Not set"
-        }`
-      );
-    }
-
-    if (message.content.startsWith("!set verify channel")) {
-      if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-      cfg.verifyChannel = message.channel.id;
-      saveConfig(cfg);
-      return message.reply("✅ This channel set as verify log.");
-    }
-
-    /* DM IMAGE HANDLER */
-    if (!message.guild && message.attachments.size > 0) {
+    // If DM contains image → verification flow
+    if (message.attachments.size > 0) {
       const guild = client.guilds.cache.first();
       if (!guild) return;
 
@@ -363,7 +330,7 @@ harley id:297057337590546434`
       const position = queue.length;
       const waitTime = position * PROCESS_TIME;
 
-      await message.author.send(
+      await message.channel.send(
         `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
       );
 
@@ -373,8 +340,43 @@ harley id:297057337590546434`
       });
 
       processQueue(client);
+      return;
     }
 
-  }); // ← closes MessageCreate
+    // If DM text but not image → ignore (or you can reply if you want)
+    return;
+  }
 
-} // ← closes setupVerify
+  /* ================= GUILD MESSAGES ================= */
+
+  // Clean verify channel
+  if (message.channel.id === cfg.verifyChannel) {
+    await message.delete().catch(() => {});
+  }
+
+  // Admin commands
+  if (message.content.startsWith("!verify set role")) {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+    const role = message.mentions.roles.first();
+    if (!role) return message.reply("Mention a role.");
+    cfg.roleId = role.id;
+    saveConfig(cfg);
+    return message.reply("✅ Verify role set.");
+  }
+
+  if (message.content === "!verify status") {
+    return message.reply(
+      `Verify Channel: ${cfg.verifyChannel || "Not set"}\nRole: ${
+        cfg.roleId ? `<@&${cfg.roleId}>` : "Not set"
+      }`
+    );
+  }
+
+  if (message.content.startsWith("!set verify channel")) {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+    cfg.verifyChannel = message.channel.id;
+    saveConfig(cfg);
+    return message.reply("✅ This channel set as verify log.");
+  }
+
+});
