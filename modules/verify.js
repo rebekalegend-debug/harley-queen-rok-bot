@@ -75,19 +75,16 @@ async function extractGovernorId(buffer) {
     .extract({
       left: Math.floor(width * 0.05),
       top: Math.floor(height * 0.12),
-      width: Math.floor(width * 0.60),
-      height: Math.floor(height * 0.30)
+      width: Math.floor(width * 0.65),
+      height: Math.floor(height * 0.28)
     })
-    .resize({ width: 1800 })
+    .resize({ width: 1600 })
     .grayscale()
-    .modulate({ brightness: 1.1 })
-    .normalize()
-    .sharpen()
     .toBuffer();
 
   const { data } = await Tesseract.recognize(cropped, "eng");
 
-  console.log("=== ID OCR RAW ===");
+  console.log("=== OCR RAW ID REGION ===");
   console.log(data.text);
 
   const cleaned = data.text.replace(/\s+/g, "");
@@ -99,6 +96,7 @@ async function extractGovernorId(buffer) {
 
   return candidates[0];
 }
+
 
 
 /* ================= ICON CHECK ================= */
