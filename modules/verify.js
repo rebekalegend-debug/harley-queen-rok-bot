@@ -409,57 +409,56 @@ The image must be:
   const cfg = loadConfig(); // 🔥 ADD THIS HERE
 
   /* ================= DM MESSAGES ================= */
-  if (!message.guild) {
+if (!message.guild) {
 
-    // If user is locked → always reply
-    if (lockedUsers.has(message.author.id)) {
+  // If user is permanently locked → always reply
+  if (lockedUsers.has(message.author.id)) {
+    await message.channel.send(
+`I'm just a bot, please reach out to <@297057337590546434>`
+    );
+    return;
+  }
+
+  // If DM contains image → verification flow
+  if (message.attachments.size > 0) {
+
+    const guildId = pendingGuild.get(message.author.id);
+    if (!guildId) {
       await message.channel.send(
 `I'm just a bot, please reach out to <@297057337590546434>`
       );
       return;
     }
 
-  // If DM contains image → verification flow
-if (message.attachments.size > 0) {
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) return;
 
-  const guildId = pendingGuild.get(message.author.id);
-  if (!guildId) {
-    console.log("No pending guild found for user:", message.author.id);
+    const guildMember = await guild.members.fetch(message.author.id).catch(() => null);
+    if (!guildMember) return;
+
+    const position = queue.length;
+    const waitTime = position * PROCESS_TIME;
+
+    await message.channel.send(
+      `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
+    );
+
+    queue.push({
+      member: guildMember,
+      attachment: message.attachments.first()
+    });
+
+    processQueue(client);
     return;
   }
 
-  const guild = client.guilds.cache.get(guildId);
-  if (!guild) {
-    console.log("Guild not found:", guildId);
-    return;
-  }
-
-  const guildMember = await guild.members.fetch(message.author.id).catch(() => null);
-  if (!guildMember) {
-    console.log("Member not found in guild:", guildId);
-    return;
-  }
-
-  const position = queue.length;
-  const waitTime = position * PROCESS_TIME;
-
+    // If DM text but not image → reply
   await message.channel.send(
-    `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
+`I'm just a bot, please reach out to <@297057337590546434>`
   );
 
-  queue.push({
-    member: guildMember,
-    attachment: message.attachments.first()
-  });
-
-  processQueue(client);
   return;
 }
-
-    // If DM text but not image → ignore (or you can reply if you want)
-    return;
-  }
-
   /* ================= GUILD MESSAGES ================= */
 
   // Clean verify channel
