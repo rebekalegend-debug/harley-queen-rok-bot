@@ -55,13 +55,30 @@ function loadDatabase() {
   const map = new Map();
   if (!fs.existsSync(DATA_FILE)) return map;
 
-  const rows = fs.readFileSync(DATA_FILE, "utf8").split("\n");
+  const rows = fs.readFileSync(DATA_FILE, "utf8")
+    .split(/\r?\n/); // handles Windows + Unix
+
   for (const row of rows) {
-    const [id, name] = row.split(",");
-    if (id && name) map.set(id.trim(), name.trim());
+    if (!row.trim()) continue;
+
+    const parts = row.split(",");
+    if (parts.length < 2) continue;
+
+    const rawId = parts[0];
+    const name = parts.slice(1).join(",").trim();
+
+    const cleanId = rawId.replace(/\D/g, "").trim();
+
+    if (cleanId.length >= 6 && cleanId.length <= 9) {
+      map.set(cleanId, name);
+    }
   }
+
+  console.log("Loaded DB IDs count:", map.size);
+
   return map;
 }
+
 
 /* ================= OCR ================= */
 
@@ -202,6 +219,9 @@ async function processQueue(client) {
 
 async function handleVerification(client, { member, attachment }) {
   const cfg = loadConfig();
+ console.log("Checking ID:", cleanId);
+console.log("DB contains ID?", db.has(cleanId));
+
   const db = loadDatabase();
 
   const user = member.user;
