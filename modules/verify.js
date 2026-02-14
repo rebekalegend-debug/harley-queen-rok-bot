@@ -16,6 +16,7 @@ const __dirname = path.dirname(__filename);
 const lockedUsers = new Set();
 const DATA_FILE = path.join(__dirname, "data.csv");
 const CONFIG_FILE = "/data/verify.config.json";
+const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -66,34 +67,105 @@ function loadDatabase() {
 
 async function extractGovernorId(buffer) {
 
-  const processed = await sharp(buffer)
+  const screenshot = await sharp(buffer)
     .resize({ width: 1600 })
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const anchor = await sharp(ID_ANCHOR)
+    .resize({ width: 220 })
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const sData = screenshot.data;
+  const aData = anchor.data;
+
+  const sWidth = screenshot.info.width;
+  const sHeight = screenshot.info.height;
+  const aWidth = anchor.info.width;
+  const aHeight = anchor.info.height;
+
+  let bestSimilarity = 0;
+  let bestX = null;
+  let bestY = null;
+
+  // Slide anchor over screenshot
+  for (let y = 0; y < sHeight - aHeight; y += 5) {
+    for (let x = 0; x < sWidth - aWidth; x += 5) {
+
+      let matchScore = 0;
+      let total = aWidth * aHeight;
+
+      for (let iy = 0; iy < aHeight; iy++) {
+        for (let ix = 0; ix < aWidth; ix++) {
+
+          const sIndex = ((y + iy) * sWidth + (x + ix));
+          const aIndex = (iy * aWidth + ix);
+
+          if (Math.abs(sData[sIndex] - aData[aIndex]) < 20) {
+            matchScore++;
+          }
+        }
+      }
+
+      const similarity = matchScore / total;
+
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestX = x;
+        bestY = y;
+      }
+    }
+  }
+
+  console.log("Anchor similarity:", bestSimilarity);
+
+  // If anchor found confidently
+  if (bestSimilarity > 0.60 && bestX !== null) {
+
+    console.log("Anchor found at:", bestX, bestY);
+
+    // Crop region to the RIGHT of anchor
+    const idRegion = await sharp(buffer)
+      .resize({ width: 1600 })
+      .extract({
+        left: bestX + aWidth,
+        top: bestY - 10,
+        width: 400,
+        height: 120
+      })
+      .grayscale()
+      .normalize()
+      .toBuffer();
+
+    const { data } = await Tesseract.recognize(idRegion, "eng");
+
+    console.log("=== ID REGION OCR ===");
+    console.log(data.text);
+
+    const cleaned = data.text.replace(/\D/g, "");
+    const match = cleaned.match(/\d{6,12}/);
+
+    if (match) return match[0];
+  }
+
+  console.log("Anchor not found. Fallback OCR.");
+
+  // Fallback full OCR
+  const fallback = await sharp(buffer)
+    .resize({ width: 1400 })
     .grayscale()
     .normalize()
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(processed, "eng");
+  const { data } = await Tesseract.recognize(fallback, "eng");
 
-  console.log("=== FULL OCR TEXT ===");
-  console.log(data.text);
+  const cleaned = data.text.replace(/\D/g, "");
+  const match = cleaned.match(/\d{6,12}/);
 
-  // Remove commas and spaces
-  const cleaned = data.text.replace(/[, ]+/g, "");
-
-  // Extract numeric sequences 6–12 digits
-  const candidates = cleaned.match(/\d{6,12}/g);
-
-  if (!candidates) return null;
-
-  // Filter out obvious Power/KP values (usually > 9 digits)
-  const filtered = candidates.filter(n => n.length >= 7 && n.length <= 9);
-
-  if (filtered.length === 0) return null;
-
-  // Pick the shortest valid candidate (ID usually shorter than KP)
-  filtered.sort((a, b) => a.length - b.length);
-
-  return filtered[0];
+  return match ? match[0] : null;
 }
 
 
