@@ -14,7 +14,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const lockedUsers = new Set();
-const DATA_FILE = path.join(__dirname, "data.csv");
+const DATA_FILE = path.join(__dirname, "DATA.csv");
 const CONFIG_FILE = "/data/verify.config.json";
 const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
 
