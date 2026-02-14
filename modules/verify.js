@@ -56,7 +56,7 @@ function loadDatabase() {
   if (!fs.existsSync(DATA_FILE)) return map;
 
   const rows = fs.readFileSync(DATA_FILE, "utf8")
-    .split(/\r?\n/); // handles Windows + Unix
+    .split(/\r?\n/);
 
   for (const row of rows) {
     if (!row.trim()) continue;
@@ -64,8 +64,8 @@ function loadDatabase() {
     const parts = row.split(",");
     if (parts.length < 2) continue;
 
-    const rawId = parts[0];
-    const name = parts.slice(1).join(",").trim();
+    const name = parts[0].trim();
+    const rawId = parts[1];
 
     const cleanId = rawId.replace(/\D/g, "").trim();
 
