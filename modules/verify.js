@@ -74,29 +74,39 @@ async function extractGovernorId(buffer, db) {
     .toBuffer();
 
   const { data } = await Tesseract.recognize(processed, "eng", {
-    tessedit_char_whitelist: "0123456789",
+    tessedit_char_whitelist: "0123456789ID",
   });
 
   console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
 
+  const idMatch = data.text.match(/ID[:\s]*([0-9]{6,9})/i);
+
+  if (idMatch) {
+    const id = idMatch[1];
+    console.log("Matched ID from pattern:", id);
+
+    if (db.has(id)) {
+      return id;
+    }
+  }
+
   const cleaned = data.text.replace(/\D/g, "");
 
-  const candidates = cleaned.match(/\d{6,10}/g);
-  if (!candidates) return null;
+  for (let len = 6; len <= 9; len++) {
+    for (let i = 0; i <= cleaned.length - len; i++) {
 
-  console.log("Candidates found:", candidates);
+      const sub = cleaned.substring(i, i + len);
 
-  for (const num of candidates) {
-    if (db.has(num)) {
-      console.log("Matched DB ID:", num);
-      return num;
+      if (db.has(sub)) {
+        console.log("Matched DB ID from substring:", sub);
+        return sub;
+      }
     }
   }
 
   return null;
 }
-
 
 
 /* ================= ICON CHECK ================= */
