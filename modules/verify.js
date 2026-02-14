@@ -99,8 +99,8 @@ async function extractGovernorId(buffer) {
 /* ================= ICON CHECK ================= */
 
 async function iconCheck(imageBuffer) {
-  const resized = await sharp(imageBuffer)
-    .resize(500)
+  const screenshot = await sharp(imageBuffer)
+    .resize({ width: 800 })
     .grayscale()
     .raw()
     .toBuffer({ resolveWithObject: true });
@@ -109,26 +109,48 @@ async function iconCheck(imageBuffer) {
     if (!fs.existsSync(iconPath)) continue;
 
     const icon = await sharp(iconPath)
-      .resize(80)
+      .resize({ width: 80 })
       .grayscale()
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    // simple pixel similarity scan
-    let matchScore = 0;
-    for (let i = 0; i < icon.data.length; i++) {
-      if (Math.abs(icon.data[i] - resized.data[i]) < 10) {
-        matchScore++;
-      }
-    }
+    const sData = screenshot.data;
+    const iData = icon.data;
 
-    if (matchScore > icon.data.length * 0.60) {
-      return true;
+    const sWidth = screenshot.info.width;
+    const sHeight = screenshot.info.height;
+    const iWidth = icon.info.width;
+    const iHeight = icon.info.height;
+
+    for (let y = 0; y < sHeight - iHeight; y += 5) {
+      for (let x = 0; x < sWidth - iWidth; x += 5) {
+
+        let matchScore = 0;
+        let total = iWidth * iHeight;
+
+        for (let iy = 0; iy < iHeight; iy++) {
+          for (let ix = 0; ix < iWidth; ix++) {
+            const sIndex = ((y + iy) * sWidth + (x + ix));
+            const iIndex = (iy * iWidth + ix);
+
+            if (Math.abs(sData[sIndex] - iData[iIndex]) < 15) {
+              matchScore++;
+            }
+          }
+        }
+
+        const similarity = matchScore / total;
+
+        if (similarity > 0.70) {
+          return true;
+        }
+      }
     }
   }
 
   return false;
 }
+
 
 /* ================= QUEUE SYSTEM ================= */
 
