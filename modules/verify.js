@@ -67,105 +67,42 @@ function loadDatabase() {
 
 async function extractGovernorId(buffer) {
 
-  const screenshot = await sharp(buffer)
-    .resize({ width: 1600 })
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const image = sharp(buffer);
+  const metadata = await image.metadata();
 
-  const anchor = await sharp(ID_ANCHOR)
-    .resize({ width: 220 })
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const width = metadata.width;
+  const height = metadata.height;
 
-  const sData = screenshot.data;
-  const aData = anchor.data;
-
-  const sWidth = screenshot.info.width;
-  const sHeight = screenshot.info.height;
-  const aWidth = anchor.info.width;
-  const aHeight = anchor.info.height;
-
-  let bestSimilarity = 0;
-  let bestX = null;
-  let bestY = null;
-
-  // Slide anchor over screenshot
-  for (let y = 0; y < sHeight - aHeight; y += 5) {
-    for (let x = 0; x < sWidth - aWidth; x += 5) {
-
-      let matchScore = 0;
-      let total = aWidth * aHeight;
-
-      for (let iy = 0; iy < aHeight; iy++) {
-        for (let ix = 0; ix < aWidth; ix++) {
-
-          const sIndex = ((y + iy) * sWidth + (x + ix));
-          const aIndex = (iy * aWidth + ix);
-
-          if (Math.abs(sData[sIndex] - aData[aIndex]) < 20) {
-            matchScore++;
-          }
-        }
-      }
-
-      const similarity = matchScore / total;
-
-      if (similarity > bestSimilarity) {
-        bestSimilarity = similarity;
-        bestX = x;
-        bestY = y;
-      }
-    }
-  }
-
-  console.log("Anchor similarity:", bestSimilarity);
-
-  // If anchor found confidently
-  if (bestSimilarity > 0.60 && bestX !== null) {
-
-    console.log("Anchor found at:", bestX, bestY);
-
-    // Crop region to the RIGHT of anchor
-    const idRegion = await sharp(buffer)
-      .resize({ width: 1600 })
-      .extract({
-        left: bestX + aWidth,
-        top: bestY - 10,
-        width: 400,
-        height: 120
-      })
-      .grayscale()
-      .normalize()
-      .toBuffer();
-
-    const { data } = await Tesseract.recognize(idRegion, "eng");
-
-    console.log("=== ID REGION OCR ===");
-    console.log(data.text);
-
-    const cleaned = data.text.replace(/\D/g, "");
-    const match = cleaned.match(/\d{6,12}/);
-
-    if (match) return match[0];
-  }
-
-  console.log("Anchor not found. Fallback OCR.");
-
-  // Fallback full OCR
-  const fallback = await sharp(buffer)
+  // Large left profile panel crop
+  const panel = await image
+    .extract({
+      left: 0,
+      top: Math.floor(height * 0.10),
+      width: Math.floor(width * 0.60),
+      height: Math.floor(height * 0.50)
+    })
     .resize({ width: 1400 })
     .grayscale()
     .normalize()
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(fallback, "eng");
+  const { data } = await Tesseract.recognize(panel, "eng");
 
-  const cleaned = data.text.replace(/\D/g, "");
-  const match = cleaned.match(/\d{6,12}/);
+  console.log("=== PANEL OCR ===");
+  console.log(data.text);
 
-  return match ? match[0] : null;
+  // Remove commas and spaces
+  const cleaned = data.text.replace(/[, ]+/g, "");
+
+  // Extract 7–9 digit numbers
+  const candidates = cleaned.match(/\d{7,9}/g);
+
+  if (!candidates) return null;
+
+  // Governor ID is usually the smallest valid large number
+  candidates.sort((a, b) => a.length - b.length);
+
+  return candidates[0];
 }
 
 
