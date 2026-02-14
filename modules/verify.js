@@ -70,7 +70,8 @@ async function extractGovernorId(buffer, db) {
   const processed = await sharp(buffer)
     .resize({ width: 1600 })
     .grayscale()
-    .threshold(150)
+    .normalize()
+    .sharpen()
     .toBuffer();
 
   const { data } = await Tesseract.recognize(processed, "eng", {
@@ -82,30 +83,29 @@ async function extractGovernorId(buffer, db) {
 
   const cleaned = data.text.replace(/\D/g, "");
 
-  const candidates = cleaned.match(/\d{6,10}/g);
+  const candidates = cleaned.match(/\d{6,12}/g);
   if (!candidates) return null;
 
   console.log("Candidates found:", candidates);
 
   for (const candidate of candidates) {
 
-  // Try all possible substrings between 6–9 digits
-  for (let len = 6; len <= 9; len++) {
-    for (let i = 0; i <= candidate.length - len; i++) {
+    for (let len = 6; len <= 9; len++) {
+      for (let i = 0; i <= candidate.length - len; i++) {
 
-      const sub = candidate.substring(i, i + len);
+        const sub = candidate.substring(i, i + len);
 
-      if (db.has(sub)) {
-        console.log("Matched DB ID from substring:", sub);
-        return sub;
+        if (db.has(sub)) {
+          console.log("Matched DB ID from substring:", sub);
+          return sub;
+        }
       }
     }
   }
-}
-
 
   return null;
 }
+
 
 
 
