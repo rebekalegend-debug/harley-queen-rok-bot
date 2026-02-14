@@ -13,7 +13,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
+const lockedUsers = new Set();
 const DATA_FILE = path.join(__dirname, "data.csv");
 const CONFIG_FILE = "/data/verify.config.json";
 
@@ -220,7 +220,7 @@ async function handleVerification(client, { member, attachment }) {
       await user.send(
         `❌ Attempt to **impersonate or bypass** detected!\nYou are now locked. Please **contact an admin**.`
       );
-
+lockedUsers.add(user.id);
       if (!cfg.verifyChannel) {
   console.log("⚠️ Verify channel not set.");
   return;
@@ -302,10 +302,22 @@ export function setupVerify(client) {
     } catch {}
   });
 
-  client.on(Events.MessageCreate, async (message) => {
-    if (message.author.bot) return;
+ client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot) return;
 
-    const cfg = loadConfig();
+  const cfg = loadConfig();
+
+  /* 🔒 LOCKED USER AUTO REPLY (DM ONLY) */
+  if (!message.guild) {
+    if (lockedUsers.has(message.author.id)) {
+      await message.reply(
+`I'm just a bot, please reach out to <@297057337590546434>
+
+harley id:297057337590546434`
+      );
+      return;
+    }
+  }
 
     /* CLEAN VERIFY CHANNEL */
     if (message.channel.id === cfg.verifyChannel && message.guild) {
