@@ -67,37 +67,58 @@ function loadDatabase() {
 
 async function extractGovernorId(buffer, db) {
 
-  const processed = await sharp(buffer)
-    .resize({ width: 1600 })
-    .grayscale()
-    .normalize()
-    .sharpen()
-    .toBuffer();
+  const preprocessVariants = [
+    // Variant 1: normalize + sharpen
+    sharp(buffer)
+      .resize({ width: 1600 })
+      .grayscale()
+      .normalize()
+      .sharpen()
+      .toBuffer(),
 
-  const { data } = await Tesseract.recognize(processed, "eng", {
-    tessedit_char_whitelist: "0123456789",
-  });
+    // Variant 2: threshold 140
+    sharp(buffer)
+      .resize({ width: 1600 })
+      .grayscale()
+      .threshold(140)
+      .toBuffer(),
 
-  console.log("=== DIGIT OCR RAW ===");
-  console.log(data.text);
+    // Variant 3: threshold 170
+    sharp(buffer)
+      .resize({ width: 1600 })
+      .grayscale()
+      .threshold(170)
+      .toBuffer()
+  ];
 
-  const cleaned = data.text.replace(/\D/g, "");
+  for (const variantPromise of preprocessVariants) {
 
-  const candidates = cleaned.match(/\d{6,12}/g);
-  if (!candidates) return null;
+    const processed = await variantPromise;
 
-  console.log("Candidates found:", candidates);
+    const { data } = await Tesseract.recognize(processed, "eng", {
+      tessedit_char_whitelist: "0123456789",
+    });
 
-  for (const candidate of candidates) {
+    console.log("=== DIGIT OCR RAW ===");
+    console.log(data.text);
 
-    for (let len = 6; len <= 9; len++) {
-      for (let i = 0; i <= candidate.length - len; i++) {
+    const cleaned = data.text.replace(/\D/g, "");
 
-        const sub = candidate.substring(i, i + len);
+    const candidates = cleaned.match(/\d{6,12}/g);
+    if (!candidates) continue;
 
-        if (db.has(sub)) {
-          console.log("Matched DB ID from substring:", sub);
-          return sub;
+    console.log("Candidates found:", candidates);
+
+    for (const candidate of candidates) {
+      for (let len = 6; len <= 9; len++) {
+        for (let i = 0; i <= candidate.length - len; i++) {
+
+          const sub = candidate.substring(i, i + len);
+
+          if (db.has(sub)) {
+            console.log("Matched DB ID:", sub);
+            return sub;
+          }
         }
       }
     }
