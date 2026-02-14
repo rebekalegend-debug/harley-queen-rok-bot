@@ -83,7 +83,7 @@ async function extractGovernorId(buffer, db) {
   const idMatch = data.text.match(/ID[:\s]*([0-9]{6,9})/i);
 
   if (idMatch) {
-  const id = idMatch[1].trim();
+const id = idMatch[1].replace(/\D/g, "");
   console.log("Matched ID from pattern:", id);
   return id;
 }
@@ -212,9 +212,9 @@ async function handleVerification(client, { member, attachment }) {
     const buffer = Buffer.from(arrayBuffer);
 
     const governorId = await extractGovernorId(buffer, db);
+    const cleanId = governorId ? governorId.replace(/\D/g, "") : null;
 
-
-    if (!governorId) {
+    if (!cleanId) {
       return rejectUser(user, member, 1, null);
     }
 
@@ -224,7 +224,7 @@ async function handleVerification(client, { member, attachment }) {
       return rejectUser(user, member, 2, null);
     }
 
-    if (!db.has(governorId)) {
+    if (!db.has(cleanId)) {
       await user.send(
         `❌ Attempt to **impersonate or bypass** detected!\nYou are now locked. Please **contact an admin**.`
       );
@@ -263,7 +263,7 @@ if (!channel) {
       return;
     }
 
-    const name = db.get(governorId);
+    const name = db.get(cleanId);
 
     await member.setNickname(name).catch(() => {});
     if (cfg.roleId) {
