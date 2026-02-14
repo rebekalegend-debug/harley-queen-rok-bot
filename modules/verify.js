@@ -67,67 +67,37 @@ function loadDatabase() {
 
 async function extractGovernorId(buffer, db) {
 
-  const preprocessVariants = [
-    // Variant 1: normalize + sharpen
-    sharp(buffer)
-      .resize({ width: 1600 })
-      .grayscale()
-      .normalize()
-      .sharpen()
-      .toBuffer(),
+  const processed = await sharp(buffer)
+    .resize({ width: 1600 })
+    .grayscale()
+    .threshold(150)
+    .toBuffer();
 
-    // Variant 2: threshold 140
-    sharp(buffer)
-      .resize({ width: 1600 })
-      .grayscale()
-      .threshold(140)
-      .toBuffer(),
+  const { data } = await Tesseract.recognize(processed, "eng", {
+    tessedit_char_whitelist: "0123456789",
+  });
 
-    // Variant 3: threshold 170
-    sharp(buffer)
-      .resize({ width: 1600 })
-      .grayscale()
-      .threshold(170)
-      .toBuffer()
-  ];
+  console.log("=== DIGIT OCR RAW ===");
+  console.log(data.text);
 
-  for (const variantPromise of preprocessVariants) {
+  const cleaned = data.text.replace(/\D/g, "");
 
-    const processed = await variantPromise;
+  console.log("Cleaned digits:", cleaned);
 
-    const { data } = await Tesseract.recognize(processed, "eng", {
-      tessedit_char_whitelist: "0123456789",
-    });
+  for (let len = 6; len <= 9; len++) {
+    for (let i = 0; i <= cleaned.length - len; i++) {
 
-    console.log("=== DIGIT OCR RAW ===");
-    console.log(data.text);
+      const sub = cleaned.substring(i, i + len);
 
-    const cleaned = data.text.replace(/\D/g, "");
-
-    const candidates = cleaned.match(/\d{6,12}/g);
-    if (!candidates) continue;
-
-    console.log("Candidates found:", candidates);
-
-    for (const candidate of candidates) {
-      for (let len = 6; len <= 9; len++) {
-        for (let i = 0; i <= candidate.length - len; i++) {
-
-          const sub = candidate.substring(i, i + len);
-
-          if (db.has(sub)) {
-            console.log("Matched DB ID:", sub);
-            return sub;
-          }
-        }
+      if (db.has(sub)) {
+        console.log("Matched DB ID:", sub);
+        return sub;
       }
     }
   }
 
   return null;
 }
-
-
 
 
 /* ================= ICON CHECK ================= */
