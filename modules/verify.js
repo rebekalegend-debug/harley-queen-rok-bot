@@ -65,44 +65,38 @@ function loadDatabase() {
 
 /* ================= OCR ================= */
 
-async function extractGovernorId(buffer) {
+async function extractGovernorId(buffer, db) {
 
-  const image = sharp(buffer);
-  const metadata = await image.metadata();
-
-  const width = metadata.width;
-  const height = metadata.height;
-
-  // Large left profile area
-  const panel = await image
-    .extract({
-      left: 0,
-      top: Math.floor(height * 0.12),
-      width: Math.floor(width * 0.60),
-      height: Math.floor(height * 0.35)
-    })
+  const processed = await sharp(buffer)
     .resize({ width: 1600 })
     .grayscale()
-    .threshold(150) // strong threshold isolates white digits
+    .threshold(150)
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(panel, "eng", {
+  const { data } = await Tesseract.recognize(processed, "eng", {
     tessedit_char_whitelist: "0123456789",
   });
 
-  console.log("=== DIGIT OCR ===");
+  console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
 
   const cleaned = data.text.replace(/\D/g, "");
 
-  if (cleaned.length >= 7 && cleaned.length <= 10) {
-    return cleaned;
+  const candidates = cleaned.match(/\d{6,10}/g);
+  if (!candidates) return null;
+
+  console.log("Candidates found:", candidates);
+
+  for (const num of candidates) {
+    if (db.has(num)) {
+      console.log("Matched DB ID:", num);
+      return num;
+    }
   }
 
-  const match = cleaned.match(/\d{7,9}/);
-
-  return match ? match[0] : null;
+  return null;
 }
+
 
 
 /* ================= ICON CHECK ================= */
@@ -208,7 +202,8 @@ async function handleVerification(client, { member, attachment }) {
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const governorId = await extractGovernorId(buffer);
+    const governorId = await extractGovernorId(buffer, db);
+
 
     if (!governorId) {
       return rejectUser(user, member, 1, null);
