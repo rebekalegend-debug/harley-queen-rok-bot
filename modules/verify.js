@@ -309,15 +309,22 @@ export function setupVerify(client) {
 
   /* 🔒 LOCKED USER AUTO REPLY (DM ONLY) */
   if (!message.guild) {
-    if (lockedUsers.has(message.author.id)) {
-      await message.reply(
+if (lockedUsers.has(message.author.id)) {
+
+  // Do NOT interfere during active verification image upload
+  if (!message.guild && message.attachments.size > 0) {
+    return;
+  }
+
+  await message.reply(
 `I'm just a bot, please reach out to <@297057337590546434>
 
 harley id:297057337590546434`
-      );
-      return;
-    }
-  }
+  );
+
+  return;
+}
+
 
     /* CLEAN VERIFY CHANNEL */
     if (message.channel.id === cfg.verifyChannel && message.guild) {
