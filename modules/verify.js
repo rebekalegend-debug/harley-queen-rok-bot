@@ -112,27 +112,17 @@ async function extractGovernorId(buffer, db) {
   console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
 
-  const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
-
-  if (idMatch) {
-  const id = idMatch[2].replace(/\D/g, "");
-  console.log("Matched ID from pattern:", id);
-  return id;
-}
-
-
   const cleaned = data.text.replace(/\D/g, "");
 
-  for (let len = 6; len <= 9; len++) {
-    for (let i = 0; i <= cleaned.length - len; i++) {
+  const candidates = cleaned.match(/\d{6,10}/g);
+  if (!candidates) return null;
 
-      const sub = cleaned.substring(i, i + len);
+  console.log("Candidates found:", candidates);
 
-      if (db.has(sub)) {
-        console.log("Matched DB ID from substring:", sub);
-        
-        return sub;
-      }
+  for (const num of candidates) {
+    if (db.has(num)) {
+      console.log("Matched DB ID:", num);
+      return num;
     }
   }
 
@@ -223,25 +213,18 @@ async function handleVerification(client, { member, attachment }) {
     console.log("FULL OCR TEXT:");
     console.log(fullText);
 
-   // ================= ID EXTRACTION =================
+  // ================= ID EXTRACTION =================
 
-// Accept ID, 1D, {ID, (ID, Governor{ID etc.
-const idMatch = fullText.match(/[\{\(\[]?\s*(?:id|1d)\s*[:\s]*([0-9]{6,9})/i);
-
-let cleanId = null;
-
-if (idMatch) {
-  cleanId = idMatch[1].replace(/\D/g, "");
-}
+const cleanId = await extractGovernorId(buffer, db);
 
 console.log("Extracted ID:", cleanId);
 console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
 
-    if (!cleanId) {
-      return rejectUser(user, member, 1, attachment);
-    }
+if (!cleanId) {
+  return rejectUser(user, member, 1, attachment);
+}
 
-    
+
 
     const keywordFound = PROFILE_KEYWORDS.some(keyword =>
       fullText.includes(keyword)
