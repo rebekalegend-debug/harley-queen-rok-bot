@@ -331,27 +331,39 @@ async function rejectUser(user, member, type, attachment) {
   const attempts = (userAttempts.get(user.id) || 0) + 1;
   userAttempts.set(user.id, attempts);
 
-  if (attempts >= 3) {
+if (attempts >= 3) {
 
-    await user.send(
-      `❌ Stop uploading. Please **contact an admin**.`
-    );
+  await user.send(
+    `❌ Stop uploading. Please **contact an admin**.`
+  );
 
-    const cfg = loadConfig();
+  // 🔒 Permanently lock user
+  lockedUsers.add(user.id);
 
-    if (cfg.verifyChannel) {
-      const channel = await member.guild.channels.fetch(cfg.verifyChannel).catch(() => null);
+  const cfg = loadConfig();
+  if (!cfg.locked) cfg.locked = [];
 
-      if (channel && attachment) {
-        await channel.send({
-          content: `❌ ${member} failed to verify.\nI cannot clearly read the Governor ID due to low quality or incorrect screenshot.\nAn **admin** please assist.`,
-          files: [attachment.url]
-        });
-      }
-    }
-
-    return;
+  if (!cfg.locked.includes(user.id)) {
+    cfg.locked.push(user.id);
+    saveConfig(cfg);
   }
+
+  console.log("User auto-locked after 3 failed attempts:", user.id);
+
+  // 📤 Send last screenshot to verify channel
+  if (cfg.verifyChannel) {
+    const channel = await member.guild.channels.fetch(cfg.verifyChannel).catch(() => null);
+
+    if (channel && attachment) {
+      await channel.send({
+        content: `❌ ${member} failed to verify after 3 attempts.\nI cannot clearly read the Governor ID due to low quality or incorrect screenshot.\nAn **admin** please assist.`,
+        files: [attachment.url]
+      });
+    }
+  }
+
+  return;
+}
 
   if (type === 1) {
     await user.send(
@@ -491,7 +503,9 @@ if (message.content.startsWith("!verify unlock")) {
   const cfg = loadConfig();
 
   lockedUsers.delete(user.id);
-
+  userAttempts.delete(user.id);
+  pendingGuild.delete(user.id);
+  
   if (cfg.locked) {
     cfg.locked = cfg.locked.filter(id => id !== user.id);
     saveConfig(cfg);
