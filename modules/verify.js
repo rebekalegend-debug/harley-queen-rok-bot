@@ -492,7 +492,7 @@ if (isDM) {
 
   return;
 }
-}
+
 
     /* ========= GUILD HANDLING ========= */
 
