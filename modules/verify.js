@@ -446,8 +446,18 @@ Thank you.`
  // ✅ Normal users get welcome
 try {
   await member.send(
-`Welcome ${member}💗! Please check your private messages for verification!
-If you do NOT received one, please leave and rejoin the server.`
+`Welcome ${member}💗!
+
+🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here, and i will verify it in less than a minute.
+📸👉🪪
+
+The image must be:
+• A real screenshot taken by you recently  
+• Full screen (no crop)  
+• With visible action points, name and civ change icon
+• Showing your main account (no farm accounts)
+
+⚠️ Edited, cropped, forwarded, or fake images will result in verification lock.`
   );
 
   dmSuccess.set(member.id, true);
