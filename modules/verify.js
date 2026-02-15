@@ -189,7 +189,7 @@ async function iconCheck(imageBuffer) {
         bestSimilarity = similarity;
       }
 
-      if (similarity > 0.65) {
+      if (similarity > 0.75) {
         console.log("✅ ICON FOUND. Similarity:", similarity);
         return true;
       }
