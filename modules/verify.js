@@ -500,6 +500,20 @@ if (isDM) {
     const member = message.member;
 
     if (!member) return;
+// ===== CLEAN VERIFY CHANNEL =====
+
+if (cfg.verifyChannel && message.channel.id === cfg.verifyChannel) {
+
+  // Allow bot messages
+  if (message.author.bot) return;
+
+  // Allow admins to use commands
+  if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+  // Delete everything else
+  await message.delete().catch(() => {});
+  return;
+}
 
     // ================= COMMANDS =================
 
