@@ -454,44 +454,45 @@ export function setupVerify(client) {
 
     const isDM = !message.guild;
 
-    /* ========= DM HANDLING ========= */
+/* ========= DM HANDLING ========= */
 
-    if (isDM) {
+if (isDM) {
 
-      // check locked across guilds
-      for (const guild of client.guilds.cache.values()) {
-        const cfg = loadConfig(guild.id);
-        if (cfg.locked && cfg.locked.includes(message.author.id)) {
-          await message.channel.send("I'm just a bot, please contact admin.");
-          return;
-        }
-      }
+  const guildId = pendingGuild.get(message.author.id);
 
-      if (message.attachments.size > 0) {
+  if (!guildId) {
+    await message.channel.send("I'm just a bot, please contact admin.");
+    return;
+  }
 
-        let guildMember = null;
+  const cfg = loadConfig(guildId);
 
-        for (const guild of client.guilds.cache.values()) {
-          const m = await guild.members.fetch(message.author.id).catch(() => null);
-          if (m) {
-            guildMember = m;
-            break;
-          }
-        }
+  // Check locked ONLY in correct guild
+  if (cfg.locked && cfg.locked.includes(message.author.id)) {
+    await message.channel.send("I'm just a bot, please contact admin.");
+    return;
+  }
 
-        if (!guildMember) return;
+  if (message.attachments.size > 0) {
 
-        queue.push({
-          member: guildMember,
-          attachment: message.attachments.first()
-        });
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) return;
 
-        await message.channel.send("⏳ Verifying your image...");
-        processQueue(client);
-      }
+    const guildMember = await guild.members.fetch(message.author.id).catch(() => null);
+    if (!guildMember) return;
 
-      return;
-    }
+    queue.push({
+      member: guildMember,
+      attachment: message.attachments.first()
+    });
+
+    await message.channel.send("⏳ Verifying your image...");
+    processQueue(client);
+  }
+
+  return;
+}
+}
 
     /* ========= GUILD HANDLING ========= */
 
