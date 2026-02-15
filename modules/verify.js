@@ -528,6 +528,60 @@ export function setupVerify(client) {
 
     if (!member) return;
 
+    // ================= COMMANDS =================
+
+if (message.content.startsWith("!verify set channel")) {
+  if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+  cfg.verifyChannel = message.channel.id;
+  saveConfig(message.guild.id, cfg);
+
+  return message.reply("✅ Verify log channel set.");
+}
+
+if (message.content.startsWith("!verify set role")) {
+  if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+  const role = message.mentions.roles.first();
+  if (!role) return message.reply("Mention a role.");
+
+  cfg.roleId = role.id;
+  saveConfig(message.guild.id, cfg);
+
+  return message.reply("✅ Verify role set.");
+}
+
+if (message.content === "!verify status") {
+  return message.reply(
+    `Verify Channel: ${cfg.verifyChannel || "Not set"}
+Role: ${cfg.roleId ? `<@&${cfg.roleId}>` : "Not set"}`
+  );
+}
+
+if (message.content.startsWith("!verify unlock")) {
+  if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+  const user = message.mentions.users.first();
+  if (!user) return message.reply("Mention a user.");
+
+  cfg.locked = (cfg.locked || []).filter(id => id !== user.id);
+  saveConfig(message.guild.id, cfg);
+
+  return message.reply("✅ User unlocked.");
+}
+
+if (message.content === "!verify locked") {
+  if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+  const list = cfg.locked || [];
+  if (list.length === 0) return message.reply("No locked users.");
+
+  return message.reply(
+    "🔒 Locked Users:\n" + list.map(id => `<@${id}>`).join("\n")
+  );
+}
+
+    
     const isVerified = cfg.roleId && member.roles.cache.has(cfg.roleId);
     if (isVerified) return;
 
