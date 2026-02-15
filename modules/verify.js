@@ -88,7 +88,7 @@ async function extractGovernorId(buffer, db) {
   const processed = await sharp(buffer)
     .resize({ width: 1600 })
     .grayscale()
-    .threshold(150)
+    .threshold()
     .toBuffer();
 
   const { data } = await Tesseract.recognize(processed, "eng", {
