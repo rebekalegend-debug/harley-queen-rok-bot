@@ -98,6 +98,21 @@ async function extractGovernorId(buffer, db) {
   console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
 
+
+const lowerText = data.text.toLowerCase();
+
+// 🔎 Check for profile text in SAME OCR pass
+const hasProfileText =
+  lowerText.includes("troop") ||
+  lowerText.includes("troops") ||
+  lowerText.includes("action");
+
+if (!hasProfileText) {
+  console.log("❌ No Troops/Action text detected in OCR.");
+  return null; // Force reject as invalid screen
+}
+
+  
   const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
 
   if (idMatch) {
