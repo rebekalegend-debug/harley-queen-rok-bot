@@ -17,23 +17,37 @@ const lockedUsers = new Set();
 const pendingGuild = new Map(); // userId -> guildId
 const DATA_FILE = path.join(__dirname, "DATA.csv");
 const CONFIG_FILE = "/data/verify.config.json";
-const PROFILE_KEYWORDS = [
-  "troop", "action",
-  "troupes", "truppen", "truppe", "tropas",
-  "voiska", "voisk", "wojska", "kita",
-  "akcja", "akcji", "accion", "acao", "azione",
-  "pasukan", "aksi", "akeji",
-  "birlik", "eylem",
-  "部队", "部隊",
-  "行動", "行动",
-  "부대", "행동",
-  "القوات"
-];
+const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
+
+// ================= PROFILE TEXT CHECK =================
+    const PROFILE_KEYWORDS = [
+      "troop", "action",
+      "troupes", "truppen", "truppe", "tropas",
+      "voiska", "voisk", "wojska",
+      "akcja", "akcji", "accion", "acao", "azione",
+      "pasukan", "aksi",
+      "birlik", "eylem",
+      "部队", "部隊",
+      "行動", "行动",
+      "부대", "행동",
+      "القوات"
+    ];
+
+
+
 
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
 }
+
+
+const ICONS = [
+  path.join(__dirname, "1.png"),
+  path.join(__dirname, "2.png"),
+  path.join(__dirname, "3.png")
+];
+
 const PROCESS_TIME = 40; // seconds average per user
 
 let queue = [];
@@ -87,7 +101,52 @@ function loadDatabase() {
 
 /* ================= OCR ================= */
 
-async function extractIdAndKeywords(buffer) {
+async function extractGovernorId(buffer, db) {
+
+  const processed = await sharp(buffer)
+    .resize({ width: 1600 })
+    .grayscale()
+    .threshold(150)
+    .toBuffer();
+
+  const { data } = await Tesseract.recognize(processed, "eng", {
+    tessedit_char_whitelist: "0123456789ID",
+  });
+
+  console.log("=== DIGIT OCR RAW ===");
+  console.log(data.text);
+
+  const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
+
+  if (idMatch) {
+  const id = idMatch[2].replace(/\D/g, "");
+  console.log("Matched ID from pattern:", id);
+  return id;
+}
+
+
+  const cleaned = data.text.replace(/\D/g, "");
+
+  for (let len = 6; len <= 9; len++) {
+    for (let i = 0; i <= cleaned.length - len; i++) {
+
+      const sub = cleaned.substring(i, i + len);
+
+      if (db.has(sub)) {
+        console.log("Matched DB ID from substring:", sub);
+        
+        return sub;
+      }
+    }
+  }
+
+  return null;
+}
+
+/* ================= PROFILE SCREEN CHECK ================= */
+
+async function profileScreenCheck(buffer) {
+  console.log("🔎 Checking for profile screen via text...");
 
   const processed = await sharp(buffer)
     .resize({ width: 1600 })
@@ -97,51 +156,30 @@ async function extractIdAndKeywords(buffer) {
 
   const { data } = await Tesseract.recognize(processed, "eng");
 
-  let text = data.text;
+  const text = data.text.toLowerCase();
 
-  console.log("=== FULL OCR TEXT ===");
+  console.log("=== PROFILE OCR TEXT ===");
   console.log(text);
 
-  const normalizedText = text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+  const anchors = [
+    "troops",
+    "commander",
+    "rankings",
+    "achievements",
+    "alliance",
+    "civilization",
+    "governor"
+  ];
 
-  // ===== Extract ID =====
-  let cleanId = null;
+  const found = anchors.some(word => text.includes(word));
 
-  const idMatch = normalizedText.match(/(id|1d)[:\s]*([0-9]{6,9})/i);
-
-  if (idMatch) {
-    cleanId = idMatch[2].replace(/\D/g, "");
-    console.log("Matched ID from pattern:", cleanId);
-  } else {
-    const digitsOnly = normalizedText.replace(/\D/g, "");
-
-    for (let len = 6; len <= 9; len++) {
-      for (let i = 0; i <= digitsOnly.length - len; i++) {
-        const sub = digitsOnly.substring(i, i + len);
-        if (/^\d{6,9}$/.test(sub)) {
-          cleanId = sub;
-          console.log("Matched ID from fallback:", cleanId);
-          break;
-        }
-      }
-      if (cleanId) break;
-    }
+  if (found) {
+    console.log("✅ Profile screen confirmed via text anchor.");
+    return true;
   }
 
-  // ===== Extract Keyword =====
-  const keywordFound = PROFILE_KEYWORDS.some(keyword =>
-    normalizedText.includes(keyword)
-  );
-
-  console.log("Keyword found:", keywordFound);
-
-  return {
-    cleanId,
-    keywordFound
-  };
+  console.log("❌ Profile screen text anchor not found.");
+  return false;
 }
 
 
@@ -166,13 +204,10 @@ async function processQueue(client) {
   }
 }
 
-
-/* ================= CORE VERIFY ================= */
-
+ //---------------------------------------------------------------
 async function handleVerification(client, { member, attachment }) {
   const cfg = loadConfig();
   const db = loadDatabase();
-
   const user = member.user;
 
   try {
@@ -182,133 +217,92 @@ async function handleVerification(client, { member, attachment }) {
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-   const { cleanId, keywordFound } = await extractIdAndKeywords(buffer);
+    const { data: fullData } = await Tesseract.recognize(buffer, "eng");
 
+    const fullText = fullData.text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
 
+    console.log("FULL OCR TEXT:");
+    console.log(fullText);
 
-console.log("DB has ID?", db.has(cleanId));
+    // ================= ID EXTRACTION =================
+    const idMatch = fullText.match(/(id|1d)[:\s]*([0-9]{6,9})/i);
+    const cleanId = idMatch ? idMatch[2].replace(/\D/g, "") : null;
 
-
-console.log("Extracted ID:", cleanId);
-
-// 1️⃣ If no ID → normal reject
-if (!cleanId) {
-  return rejectUser(user, member, 1, attachment);
-}
-
-
-
-// 3️⃣ If ID found but no keyword → impersonation lock
-if (!keywordFound) {
-
-  console.log("ID found but no profile keywords → impersonation");
-
-  await user.send(
-    `❌ Governor ID detected, but this does not appear to be a valid in-game profile screen.\nYou are now locked. Please contact an admin.`
-  );
-
-  lockedUsers.add(user.id);
-
-  const cfg = loadConfig();
-  if (!cfg.locked) cfg.locked = [];
-
-  if (!cfg.locked.includes(user.id)) {
-    cfg.locked.push(user.id);
-    saveConfig(cfg);
-  }
-
-  const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
-
-  if (channel) {
-    await channel.send({
-      content: `❌ ${member} attempted verification with valid ID but no profile screen keywords detected.`,
-      files: [attachment.url]
-    });
-  }
-
-  return;
-}
-
-console.log("Profile keywords detected.");
-console.log("DB has ID?", db.has(cleanId));
-
+    console.log("Extracted ID:", cleanId);
+    console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
 
     if (!cleanId) {
       return rejectUser(user, member, 1, attachment);
     }
 
+    
 
+    const keywordFound = PROFILE_KEYWORDS.some(keyword =>
+      fullText.includes(keyword)
+    );
 
+    if (!keywordFound) {
+      console.log("No valid profile keywords found.");
+      return rejectUser(user, member, 2, attachment);
+    }
+
+    // ================= DATABASE CHECK =================
     if (!db.has(cleanId)) {
       await user.send(
         `❌ You uploaded a farm account profile, or attempting to **impersonate or bypass** the system!\nYou are now locked. Please **contact an admin**.`
       );
-lockedUsers.add(user.id);
 
-const cfg = loadConfig();
+      lockedUsers.add(user.id);
 
-if (!cfg.locked) cfg.locked = [];
+      if (!cfg.locked) cfg.locked = [];
+      if (!cfg.locked.includes(user.id)) {
+        cfg.locked.push(user.id);
+        saveConfig(cfg);
+      }
 
-if (!cfg.locked.includes(user.id)) {
-  cfg.locked.push(user.id);
-  saveConfig(cfg);
-}
+      console.log("User permanently locked:", user.id);
 
-console.log("User permanently locked:", user.id);
-
-
-      if (!cfg.verifyChannel) {
-  console.log("⚠️ Verify channel not set.");
-  return;
-}
-
-const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
-if (!channel) {
-  console.log("❌ Could not fetch verify channel.");
-  return;
-}
-
-      if (channel) {
-        await channel.send({
-          content: `❌ ${member} has been banned from verification due to suspected farm account usage or an attempt to impersonate another player / bypass the verification system.`,
-          files: [attachment.url]
-        });
+      if (cfg.verifyChannel) {
+        const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+        if (channel) {
+          await channel.send({
+            content: `❌ ${member} has been banned from verification due to suspected farm account usage or impersonation attempt.`,
+            files: [attachment.url]
+          });
+        }
       }
 
       return;
     }
-
+   // ================= SUCCESS =================
     const name = db.get(cleanId);
 
-    try {
-  await member.setNickname(name);
-  console.log("Nickname changed");
-} catch (err) {
-  console.error("Nickname change failed:", err);
-}
+    await member.setNickname(name).catch(console.error);
+
     if (cfg.roleId) {
-      try {
-  await member.roles.add(cfg.roleId);
-  console.log("Role added");
-} catch (err) {
-  console.error("Role add failed:", err);
-}
+      await member.roles.add(cfg.roleId).catch(console.error);
     }
 
     await user.send(`✅ You are now verified as **${name}**`);
-pendingGuild.delete(member.id);
-    const channel = await client.channels.fetch(cfg.verifyChannel);
-    if (channel) {
-      await channel.send({
-        content: `✅ ${member} verified, an **admin** please check the profile to make sure!💗`,
-        files: [attachment.url]
-      });
+    pendingGuild.delete(member.id);
+
+    if (cfg.verifyChannel) {
+      const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+      if (channel) {
+        await channel.send({
+          content: `✅ ${member} verified, an **admin** please check the profile to make sure!💗`,
+          files: [attachment.url]
+        });
+      }
     }
+
   } catch (err) {
     console.error(err);
   }
 }
-
 /* ================= REJECT SYSTEM ================= */
 
 async function rejectUser(user, member, type, attachment) {
@@ -476,32 +470,6 @@ if (message.attachments.size > 0) {
 }
   /* ================= GUILD MESSAGES ================= */
 
-// 🔁 Fallback welcome DM if first DM failed
-if (message.guild && pendingGuild.has(message.author.id)) {
-
-  const guildId = pendingGuild.get(message.author.id);
-
-  if (guildId === message.guild.id) {
-
-    try {
-      await message.author.send(
-`Welcome ${message.author}💗!
-
-🆙 Please upload a screenshot of your Rise of Kingdoms profile here, and I will verify it.`
-      );
-
-      console.log("Fallback DM sent to:", message.author.id);
-
-    } catch (err) {
-      console.log("Fallback DM failed:", message.author.id, err.code);
-    }
-
-    pendingGuild.delete(message.author.id);
-  }
-}
-
-
-    
   // Clean verify channel
   if (message.channel.id === cfg.verifyChannel) {
     await message.delete().catch(() => {});
