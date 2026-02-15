@@ -212,11 +212,7 @@ async function handleVerification(client, { member, attachment }) {
       return rejectUser(user, member, 1, attachment);
     }
 
-const profileValid = await profileScreenCheck(buffer);
 
-if (!profileValid) {
-  return rejectUser(user, member, 2, attachment);
-}
 
     if (!db.has(cleanId)) {
       await user.send(
