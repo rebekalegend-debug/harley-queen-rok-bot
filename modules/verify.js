@@ -25,17 +25,13 @@ const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
       "troupes", "truppen", "truppe", "tropas",
       "voiska", "voisk", "wojska",
       "akcja", "akcji", "accion", "acao", "azione",
-      "pasukan", "aksi",
+      "pasukan", "aksi", "akeji",
       "birlik", "eylem",
       "部队", "部隊",
       "行動", "行动",
       "부대", "행동",
       "القوات"
     ];
-
-
-
-
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
