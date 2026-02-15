@@ -420,8 +420,7 @@ try {
 The image must be:
 • A real screenshot taken by you recently  
 • Full screen (no crop)  
-• With visible action points  
-• With visible name-change icon  
+• With visible action points, name and civ change icon
 • Showing your main account (no farm accounts)
 
 ⚠️ Edited, cropped, forwarded, or fake images will result in verification lock.`
