@@ -125,79 +125,42 @@ async function extractGovernorId(buffer, db) {
   return null;
 }
 
+/* ================= PROFILE SCREEN CHECK ================= */
 
-/* ================= ICON CHECK ================= */
+async function profileScreenCheck(buffer) {
+  console.log("🔎 Checking for profile screen via text...");
 
-async function iconCheck(imageBuffer) {
-  console.log("🔎 Checking for edit icon...");
-
-  const image = sharp(imageBuffer);
-  const metadata = await image.metadata();
-
-  const width = metadata.width;
-  const height = metadata.height;
-
-  // Crop LEFT PROFILE PANEL ONLY
-  const profilePanel = await image
-    .extract({
-      left: 0,
-      top: 0,
-      width: Math.floor(width * 0.60),
-      height: Math.floor(height * 0.55)
-    })
+  const processed = await sharp(buffer)
+    .resize({ width: 1600 })
     .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+    .normalize()
+    .toBuffer();
 
-  const icon = await sharp(ICONS[0]) // your 1.png
-    .resize({ width: 28 }) // realistic size
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const { data } = await Tesseract.recognize(processed, "eng");
 
-  const sData = profilePanel.data;
-  const iData = icon.data;
+  const text = data.text.toLowerCase();
 
-  const sWidth = profilePanel.info.width;
-  const sHeight = profilePanel.info.height;
-  const iWidth = icon.info.width;
-  const iHeight = icon.info.height;
+  console.log("=== PROFILE OCR TEXT ===");
+  console.log(text);
 
-  let bestSimilarity = 0;
+  const anchors = [
+    "troops",
+    "commander",
+    "rankings",
+    "achievements",
+    "alliance",
+    "civilization",
+    "governor"
+  ];
 
-  for (let y = 0; y < sHeight - iHeight; y += 3) {
-    for (let x = 0; x < sWidth - iWidth; x += 3) {
+  const found = anchors.some(word => text.includes(word));
 
-      let matchScore = 0;
-      let total = iWidth * iHeight;
-
-      for (let iy = 0; iy < iHeight; iy++) {
-        for (let ix = 0; ix < iWidth; ix++) {
-
-          const sIndex = ((y + iy) * sWidth + (x + ix));
-          const iIndex = (iy * iWidth + ix);
-
-          if (Math.abs(sData[sIndex] - iData[iIndex]) < 25) {
-            matchScore++;
-          }
-        }
-      }
-
-      const similarity = matchScore / total;
-
-      if (similarity > bestSimilarity) {
-        bestSimilarity = similarity;
-      }
-
-      if (similarity > 0.90) {
-        console.log("✅ ICON FOUND. Similarity:", similarity);
-        return true;
-      }
-    }
+  if (found) {
+    console.log("✅ Profile screen confirmed via text anchor.");
+    return true;
   }
 
-  console.log("Best similarity:", bestSimilarity);
-  console.log("❌ Icon not detected.");
+  console.log("❌ Profile screen text anchor not found.");
   return false;
 }
 
@@ -249,11 +212,11 @@ async function handleVerification(client, { member, attachment }) {
       return rejectUser(user, member, 1, attachment);
     }
 
-    const iconValid = await iconCheck(buffer);
+const profileValid = await profileScreenCheck(buffer);
 
-    if (!iconValid) {
-      return rejectUser(user, member, 2, attachment);
-    }
+if (!profileValid) {
+  return rejectUser(user, member, 2, attachment);
+}
 
     if (!db.has(cleanId)) {
       await user.send(
