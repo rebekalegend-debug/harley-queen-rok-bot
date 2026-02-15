@@ -196,20 +196,7 @@ if (!cleanId) {
   return rejectUser(user, member, 1, attachment);
 }
 
-// 2️⃣ Run profile OCR ONLY after ID exists
-const { data: fullData } = await Tesseract.recognize(buffer, "eng");
 
-const fullText = fullData.text
-  .toLowerCase()
-  .normalize("NFD")
-  .replace(/[\u0300-\u036f]/g, "");
-
-console.log("PROFILE OCR TEXT:");
-console.log(fullText);
-
-const keywordFound = PROFILE_KEYWORDS.some(keyword =>
-  fullText.includes(keyword)
-);
 
 // 3️⃣ If ID found but no keyword → impersonation lock
 if (!keywordFound) {
@@ -489,6 +476,32 @@ if (message.attachments.size > 0) {
 }
   /* ================= GUILD MESSAGES ================= */
 
+// 🔁 Fallback welcome DM if first DM failed
+if (message.guild && pendingGuild.has(message.author.id)) {
+
+  const guildId = pendingGuild.get(message.author.id);
+
+  if (guildId === message.guild.id) {
+
+    try {
+      await message.author.send(
+`Welcome ${message.author}💗!
+
+🆙 Please upload a screenshot of your Rise of Kingdoms profile here, and I will verify it.`
+      );
+
+      console.log("Fallback DM sent to:", message.author.id);
+
+    } catch (err) {
+      console.log("Fallback DM failed:", message.author.id, err.code);
+    }
+
+    pendingGuild.delete(message.author.id);
+  }
+}
+
+
+    
   // Clean verify channel
   if (message.channel.id === cfg.verifyChannel) {
     await message.delete().catch(() => {});
