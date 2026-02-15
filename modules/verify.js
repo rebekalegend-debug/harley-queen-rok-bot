@@ -13,10 +13,10 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const lockedUsers = new Set();
+
 const pendingGuild = new Map(); // userId -> guildId
 const DATA_FILE = path.join(__dirname, "DATA.csv");
-const CONFIG_FILE = "/data/verify.config.json";
+const CONFIG_DIR = "/data/verify";
 const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
 const dmSuccess = new Map(); // userId -> boolean
 
@@ -83,6 +83,9 @@ const PROFILE_KEYWORDS = [
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
 }
+if (!fs.existsSync(CONFIG_DIR)) {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+}
 
 
 const ICONS = [
@@ -99,17 +102,31 @@ let userAttempts = new Map();
 
 /* ================= CONFIG ================= */
 
-function loadConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-  } catch {
-    return { verifyChannel: null, roleId: null, locked: [] };
-  }
+function getConfigPath(guildId) {
+  return path.join(CONFIG_DIR, `${guildId}.json`);
 }
 
-function saveConfig(cfg) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
+function loadConfig(guildId) {
+  const file = getConfigPath(guildId);
+
+  if (!fs.existsSync(file)) {
+    const defaultConfig = {
+      verifyChannel: null,
+      roleId: null,
+      locked: []
+    };
+    fs.writeFileSync(file, JSON.stringify(defaultConfig, null, 2));
+    return defaultConfig;
+  }
+
+  return JSON.parse(fs.readFileSync(file, "utf8"));
 }
+
+function saveConfig(guildId, config) {
+  const file = getConfigPath(guildId);
+  fs.writeFileSync(file, JSON.stringify(config, null, 2));
+}
+
 
 /* ================= CSV LOAD ================= */
 
@@ -253,7 +270,7 @@ async function processQueue(client) {
 /* ================= CORE VERIFY ================= */
 
 async function handleVerification(client, { member, attachment }) {
-  const cfg = loadConfig();
+  const cfg = loadConfig(member.guild.id);
   const db = loadDatabase();
 
   const user = member.user;
@@ -289,28 +306,28 @@ if (!hasProfileText) {
 }
 
 
-    if (!db.has(cleanId)) {
-      await user.send(
-        `❌ You uploaded a farm account profile, or attempting to **impersonate or bypass** the system!\nYou are now locked. Please **contact an admin**.`
-      );
-lockedUsers.add(user.id);
+   if (!db.has(cleanId)) {
+  await user.send(
+    `❌ You uploaded a farm account profile, or attempting to **impersonate or bypass** the system!
+You are now locked. Please contact an admin.`
+  );
 
-const cfg = loadConfig();
+  const cfg = loadConfig(member.guild.id);
 
-if (!cfg.locked) cfg.locked = [];
+  if (!cfg.locked) cfg.locked = [];
 
-if (!cfg.locked.includes(user.id)) {
-  cfg.locked.push(user.id);
-  saveConfig(cfg);
-}
+  if (!cfg.locked.includes(user.id)) {
+    cfg.locked.push(user.id);
+    saveConfig(member.guild.id, cfg);
+  }
 
-console.log("User permanently locked:", user.id);
+  console.log("User permanently locked:", user.id);
 
+  if (!cfg.verifyChannel) {
+    console.log("⚠️ Verify channel not set.");
+    return;
+  }
 
-      if (!cfg.verifyChannel) {
-  console.log("⚠️ Verify channel not set.");
-  return;
-}
 
 const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
 if (!channel) {
@@ -372,15 +389,14 @@ if (attempts >= 3) {
   );
 
   // 🔒 Permanently lock user
-  lockedUsers.add(user.id);
+  const cfg = loadConfig(member.guild.id);
 
-  const cfg = loadConfig();
-  if (!cfg.locked) cfg.locked = [];
+if (!cfg.locked) cfg.locked = [];
 
-  if (!cfg.locked.includes(user.id)) {
-    cfg.locked.push(user.id);
-    saveConfig(cfg);
-  }
+if (!cfg.locked.includes(user.id)) {
+  cfg.locked.push(user.id);
+  saveConfig(member.guild.id, cfg);
+}
 
   console.log("User auto-locked after 3 failed attempts:", user.id);
 
@@ -415,270 +431,112 @@ if (attempts >= 3) {
 /* ================= MAIN EXPORT ================= */
 
 export function setupVerify(client) {
-const cfg = loadConfig();
-if (cfg.locked && Array.isArray(cfg.locked)) {
-  for (const id of cfg.locked) {
-    lockedUsers.add(id);
-  }
-}
- client.on(Events.GuildMemberAdd, async (member) => {
-pendingGuild.set(member.id, member.guild.id);
-  const cfg = loadConfig();
 
-  // 🚫 If permanently locked → DO NOT send welcome
-  if (cfg.locked && cfg.locked.includes(member.id)) {
+  /* ================= MEMBER JOIN ================= */
 
-    console.log("Blocked rejoin attempt:", member.id);
+  client.on(Events.GuildMemberAdd, async (member) => {
+
+    pendingGuild.set(member.id, member.guild.id);
+
+    const cfg = loadConfig(member.guild.id);
+
+    if (cfg.locked && cfg.locked.includes(member.id)) {
+      try {
+        await member.send("🚫 You are banned from verification. Contact an admin.");
+      } catch {}
+      return;
+    }
 
     try {
       await member.send(
-`🚫 You are banned from verification due to attempting to bypass the system.
+`Welcome ${member} 💗!
 
-If you believe this was a mistake, please contact an admin.
+🆙 Please upload your Rise of Kingdoms profile screenshot here.
 
-Thank you.`
-      );
-    } catch {}
-
-    return; // 🔴 VERY IMPORTANT — stop here
-  }
-
- // ✅ Normal users get welcome
-try {
-  await member.send(
-`Welcome ${member}💗!
-
-🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here, and i will verify it in less than a minute.
-📸👉🪪
-
-The image must be:
-• A real screenshot taken by you recently  
-• Full screen (no crop)  
-• With visible action points, name and civ change icon
-• Showing your main account (no farm accounts)
-
-⚠️ Edited, cropped, forwarded, or fake images will result in verification lock.`
-  );
-
-  dmSuccess.set(member.id, true);
-  console.log("Welcome DM sent:", member.id);
-
-} catch (err) {
-
-  dmSuccess.set(member.id, false);
-  console.log("Welcome DM failed:", member.id, err?.code);
-}
-
-});
-
-  client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot) return;
-
-  const cfg = loadConfig(); // 🔥 ADD THIS HERE
-
-  /* ================= DM MESSAGES ================= */
-if (!message.guild) {
-
-  // If user is permanently locked → always reply
-  if (lockedUsers.has(message.author.id)) {
-    await message.channel.send(
-`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
-    );
-    return;
-  }
-
- // If DM contains image → verification flow
-if (message.attachments.size > 0) {
-
-  // Find the guild where this user is a member
-let guildMember = null;
-
-for (const guild of client.guilds.cache.values()) {
-  const member = await guild.members.fetch(message.author.id).catch(() => null);
-  if (member) {
-    guildMember = member;
-    break;
-  }
-}
-
-if (!guildMember) {
-  await message.channel.send(
-`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
-  );
-  return;
-}
-
-
-  // Push FIRST
-  queue.push({
-    member: guildMember,
-    attachment: message.attachments.first()
-  });
-
-  // Now calculate correctly
-  const backlog = queue.length - 1 + (processing ? 1 : 0);
-
-  // Show realistic time (including own processing time)
-  const waitTime = (backlog + 1) * PROCESS_TIME;
-
-  await message.channel.send(
-    `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
-  );
-
-  processQueue(client);
-  return;
-}
-
-
-    // If DM text but not image → reply
-  await message.channel.send(
-`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
-  );
-
-  return;
-}
-  /* ================= GUILD MESSAGES ================= */
-/* ================= GUILD MESSAGES ================= */
-
-// 🔔 Reminder if DM failed
-{
- const member = message.member;
-if (!member) return;
-
-// Ignore verified users
-const isVerified = cfg.roleId && member.roles.cache.has(cfg.roleId);
-if (isVerified) return;
-
-// Only act for new / unverified users
-if (dmSuccess.has(member.id)) {
-
-  const dmWorked = dmSuccess.get(member.id);
-
-  if (dmWorked === true) {
-
-    await message.reply(
-`Welcome ${member}💗! Please check your private messages for verification!`
-    );
-
-  } else if (dmWorked === false) {
-
-    await message.reply(
-`Welcome ${member}💗! Please check your private messages for verification!
-If you did NOT receive one, please leave and rejoin the server.`
-    );
-
-  }
-
-  return;
-}
-}
-
-
-    
-// Fallback welcome DM if first one failed
-if (message.guild && pendingGuild.has(message.author.id)) {
-
-  const guildId = pendingGuild.get(message.author.id);
-
-  if (guildId === message.guild.id) {
-
-    try {
-      await message.author.send(
-`Welcome ${member}💗!
-
-🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here, and i will verify it in less than a minute.
-📸👉🪪
-
-The image must be:
-• A real screenshot taken by you recently  
-• Full screen (no crop)  
-• With visible action points, name and civ change icon
-• Showing your main account (no farm accounts)
-
-⚠️ Edited, cropped, forwarded, or fake images will result in verification lock.`
+⚠️ Cropped / edited images will result in verification lock.`
       );
 
-      console.log("Fallback DM sent:", message.author.id);
+      dmSuccess.set(member.id, true);
 
-    } catch (err) {
-      console.log("Fallback DM failed:", message.author.id, err.code);
+    } catch {
+      dmSuccess.set(member.id, false);
     }
 
-    pendingGuild.delete(message.author.id);
-  }
-}
+  });
 
+  /* ================= MESSAGE CREATE ================= */
+
+  client.on(Events.MessageCreate, async (message) => {
+
+    if (message.author.bot) return;
+
+    const isDM = !message.guild;
+
+    /* ========= DM HANDLING ========= */
+
+    if (isDM) {
+
+      // check locked across guilds
+      for (const guild of client.guilds.cache.values()) {
+        const cfg = loadConfig(guild.id);
+        if (cfg.locked && cfg.locked.includes(message.author.id)) {
+          await message.channel.send("I'm just a bot, please contact admin.");
+          return;
+        }
+      }
+
+      if (message.attachments.size > 0) {
+
+        let guildMember = null;
+
+        for (const guild of client.guilds.cache.values()) {
+          const m = await guild.members.fetch(message.author.id).catch(() => null);
+          if (m) {
+            guildMember = m;
+            break;
+          }
+        }
+
+        if (!guildMember) return;
+
+        queue.push({
+          member: guildMember,
+          attachment: message.attachments.first()
+        });
+
+        await message.channel.send("⏳ Verifying your image...");
+        processQueue(client);
+      }
+
+      return;
+    }
+
+    /* ========= GUILD HANDLING ========= */
+
+    const cfg = loadConfig(message.guild.id);
+    const member = message.member;
+
+    if (!member) return;
+
+    const isVerified = cfg.roleId && member.roles.cache.has(cfg.roleId);
+    if (isVerified) return;
+
+    if (dmSuccess.has(member.id)) {
+
+      const worked = dmSuccess.get(member.id);
+
+      if (worked) {
+        await message.reply("Please check your private messages for verification.");
+      } else {
+        await message.reply("Please enable DMs and rejoin the server to receive verification message.");
+      }
+
+      return;
+    }
+
+  });
+
+}
 
 
     
-  // Clean verify channel
-  if (message.channel.id === cfg.verifyChannel) {
-    await message.delete().catch(() => {});
-  }
- 
-    // unlock an locked user
-if (message.content.startsWith("!verify unlock")) {
-  if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-
-  const user = message.mentions.users.first();
-  if (!user) return message.reply("Mention a user to unlock.");
-
-  const cfg = loadConfig();
-
-  lockedUsers.delete(user.id);
-  userAttempts.delete(user.id);
-  pendingGuild.delete(user.id);
-  
-  if (cfg.locked) {
-    cfg.locked = cfg.locked.filter(id => id !== user.id);
-    saveConfig(cfg);
-  }
-
-  return message.reply(`✅ ${user.tag} has been unlocked.`);
-}
-
-  //list locked users
-if (message.content === "!verify locked") {
-  if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-
-  const cfg = loadConfig();
-  const list = cfg.locked || [];
-
-  if (list.length === 0) return message.reply("No locked users.");
-
-  return message.reply(
-    "🔒 Locked Users:\n" + list.map(id => `<@${id}>`).join("\n")
-  );
-}
-
-
-
-    
-    
-  // Admin commands
-  if (message.content.startsWith("!verify set role")) {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-    const role = message.mentions.roles.first();
-    if (!role) return message.reply("Mention a role.");
-    cfg.roleId = role.id;
-    saveConfig(cfg);
-    return message.reply("✅ Verify role set.");
-  }
-
-  if (message.content === "!verify status") {
-    return message.reply(
-      `Verify Channel: ${cfg.verifyChannel || "Not set"}\nRole: ${
-        cfg.roleId ? `<@&${cfg.roleId}>` : "Not set"
-      }`
-    );
-  }
-
-  if (message.content.startsWith("!set verify channel")) {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-    cfg.verifyChannel = message.channel.id;
-    saveConfig(cfg);
-    return message.reply("✅ This channel set as verify log.");
-  }
-
-});
-}
