@@ -524,6 +524,42 @@ if (message.attachments.size > 0) {
 }
   /* ================= GUILD MESSAGES ================= */
 
+// Fallback welcome DM if first one failed
+if (message.guild && pendingGuild.has(message.author.id)) {
+
+  const guildId = pendingGuild.get(message.author.id);
+
+  if (guildId === message.guild.id) {
+
+    try {
+      await message.author.send(
+`Welcome ${member}💗!
+
+🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here, and i will verify it in less than a minute.
+📸👉🪪
+
+The image must be:
+• A real screenshot taken by you recently  
+• Full screen (no crop)  
+• With visible action points, name and civ change icon
+• Showing your main account (no farm accounts)
+
+⚠️ Edited, cropped, forwarded, or fake images will result in verification lock.`
+      );
+
+      console.log("Fallback DM sent:", message.author.id);
+
+    } catch (err) {
+      console.log("Fallback DM failed:", message.author.id, err.code);
+    }
+
+    pendingGuild.delete(message.author.id);
+  }
+}
+
+
+
+    
   // Clean verify channel
   if (message.channel.id === cfg.verifyChannel) {
     await message.delete().catch(() => {});
