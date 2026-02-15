@@ -184,43 +184,7 @@ async function handleVerification(client, { member, attachment }) {
 
    const { cleanId, keywordFound } = await extractIdAndKeywords(buffer);
 
-console.log("Extracted ID:", cleanId);
 
-// 1️⃣ No ID
-if (!cleanId) {
-  return rejectUser(user, member, 1, attachment);
-}
-
-// 2️⃣ ID found but no keyword → impersonation
-if (!keywordFound) {
-
-  console.log("ID found but no profile keywords → impersonation");
-
-  await user.send(
-    `❌ Governor ID detected, but this does not appear to be a valid in-game profile screen.\nYou are now locked. Please contact an admin.`
-  );
-
-  lockedUsers.add(user.id);
-
-  const cfg = loadConfig();
-  if (!cfg.locked) cfg.locked = [];
-
-  if (!cfg.locked.includes(user.id)) {
-    cfg.locked.push(user.id);
-    saveConfig(cfg);
-  }
-
-  const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
-
-  if (channel) {
-    await channel.send({
-      content: `❌ ${member} attempted verification with valid ID but no profile screen keywords detected.`,
-      files: [attachment.url]
-    });
-  }
-
-  return;
-}
 
 console.log("DB has ID?", db.has(cleanId));
 
