@@ -364,7 +364,17 @@ if (!channel) {
 
     await user.send(`✅ You are now verified as **${name}**`);
 pendingGuild.delete(member.id);
-    const channel = await client.channels.fetch(cfg.verifyChannel);
+    if (!cfg.verifyChannel) {
+  console.log("⚠️ Verify channel not set.");
+  return;
+}
+
+const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+if (!channel) {
+  console.log("❌ Could not fetch verify channel.");
+  return;
+}
+
     if (channel) {
       await channel.send({
         content: `✅ ${member} verified, an **admin** please check the profile to make sure!💗`,
