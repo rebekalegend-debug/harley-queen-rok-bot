@@ -286,7 +286,7 @@ if (!channel) {
 
       if (channel) {
         await channel.send({
-          content: `❌ ${member} uploaded a farm account, or trying to **impersonate someone or bypass my system**!`,
+          content: `❌ ${member} has been banned from verification due to suspected farm account usage or an attempt to impersonate another player / bypass the verification system.`,
           files: [attachment.url]
         });
       }
