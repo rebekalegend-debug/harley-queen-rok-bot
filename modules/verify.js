@@ -463,8 +463,8 @@ if (!message.guild) {
     const guildMember = await guild.members.fetch(message.author.id).catch(() => null);
     if (!guildMember) return;
 
-    const position = queue.length;
-    const waitTime = position * PROCESS_TIME;
+    const backlog = queue.length + (processing ? 1 : 0);
+    const waitTime = backlog * PROCESS_TIME;
 
     await message.channel.send(
       `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
