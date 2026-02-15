@@ -19,20 +19,6 @@ const DATA_FILE = path.join(__dirname, "DATA.csv");
 const CONFIG_FILE = "/data/verify.config.json";
 const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
 
-// ================= PROFILE TEXT CHECK =================
-    const PROFILE_KEYWORDS = [
-      "troop", "action",
-      "troupes", "truppen", "truppe", "tropas",
-      "voiska", "voisk", "wojska",
-      "akcja", "akcji", "accion", "acao", "azione",
-      "pasukan", "aksi", "akeji",
-      "birlik", "eylem",
-      "部队", "部隊",
-      "行動", "行动",
-      "부대", "행동",
-      "القوات"
-    ];
-
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
 }
@@ -213,12 +199,10 @@ async function handleVerification(client, { member, attachment }) {
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const { data: fullData } = await Tesseract.recognize(buffer, "eng");
-
-    const fullText = fullData.text
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+    // Run OCR ONCE
+    const { data } = await Tesseract.recognize(buffer, "eng");
+    const fullText = data.text;
+    const lowerText = fullText.toLowerCase();
 
     console.log("FULL OCR TEXT:");
     console.log(fullText);
@@ -234,14 +218,12 @@ async function handleVerification(client, { member, attachment }) {
       return rejectUser(user, member, 1, attachment);
     }
 
-    
+    // ================= TROOPS / ACTION CHECK =================
+    const hasTroop = lowerText.includes("troop");
+    const hasAction = lowerText.includes("action");
 
-    const keywordFound = PROFILE_KEYWORDS.some(keyword =>
-      fullText.includes(keyword)
-    );
-
-    if (!keywordFound) {
-      console.log("No valid profile keywords found.");
+    if (!hasTroop && !hasAction) {
+      console.log("Neither 'troop' nor 'action' found.");
       return rejectUser(user, member, 2, attachment);
     }
 
@@ -273,13 +255,24 @@ async function handleVerification(client, { member, attachment }) {
 
       return;
     }
-   // ================= SUCCESS =================
+
+    // ================= SUCCESS =================
     const name = db.get(cleanId);
 
-    await member.setNickname(name).catch(console.error);
+    try {
+      await member.setNickname(name);
+      console.log("Nickname changed");
+    } catch (err) {
+      console.error("Nickname change failed:", err);
+    }
 
     if (cfg.roleId) {
-      await member.roles.add(cfg.roleId).catch(console.error);
+      try {
+        await member.roles.add(cfg.roleId);
+        console.log("Role added");
+      } catch (err) {
+        console.error("Role add failed:", err);
+      }
     }
 
     await user.send(`✅ You are now verified as **${name}**`);
@@ -289,7 +282,7 @@ async function handleVerification(client, { member, attachment }) {
       const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
       if (channel) {
         await channel.send({
-          content: `✅ ${member} verified, an **admin** please check the profile to make sure!💗`,
+          content: `✅ ${member} verified.`,
           files: [attachment.url]
         });
       }
@@ -299,6 +292,7 @@ async function handleVerification(client, { member, attachment }) {
     console.error(err);
   }
 }
+
 /* ================= REJECT SYSTEM ================= */
 
 async function rejectUser(user, member, type, attachment) {
