@@ -208,6 +208,17 @@ async function handleVerification(client, { member, attachment }) {
     console.log("Extracted ID:", cleanId);
     console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
 
+const { data: fullData } = await Tesseract.recognize(buffer, "eng");
+const fullText = fullData.text.toLowerCase();
+
+console.log("FULL OCR TEXT FOR TROOPS CHECK:");
+console.log(fullText);
+
+if (!fullText.includes("troop")) {
+  console.log("Troops text not found.");
+  return rejectUser(user, member, 2, attachment);
+}
+    
     if (!cleanId) {
       return rejectUser(user, member, 1, attachment);
     }
