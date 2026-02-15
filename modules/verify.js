@@ -18,6 +18,65 @@ const pendingGuild = new Map(); // userId -> guildId
 const DATA_FILE = path.join(__dirname, "DATA.csv");
 const CONFIG_FILE = "/data/verify.config.json";
 const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
+const PROFILE_KEYWORDS = [
+
+  // English
+  "troop", "troops", "action",
+
+  // French
+  "troupe", "troupes", "action",
+
+  // German
+  "truppe", "truppen", "aktion",
+
+  // Russian
+  "войска", "войско", "действие",
+
+  // Portuguese
+  "tropa", "tropas", "acao", "ação",
+
+  // Spanish
+  "tropa", "tropas", "accion", "acción",
+
+  // Italian
+  "truppa", "truppe", "azione",
+
+  // Polish
+  "wojsko", "wojska", "akcja",
+
+  // Indonesian
+  "pasukan", "aksi",
+
+  // Malay
+  "pasukan", "aksi",
+
+  // Turkish
+  "birlik", "birlikler", "eylem",
+
+  // Vietnamese
+  "quan", "hanh dong",
+
+  // Thai
+  "กองทัพ", "การกระทำ",
+
+  // Arabic
+  "القوات", "قوات", "عمل",
+
+  // Korean
+  "부대", "행동",
+
+  // Japanese
+  "部隊", "行動",
+
+  // Simplified Chinese
+  "部队", "行动",
+
+  // Traditional Chinese
+  "部隊", "行動"
+];
+
+
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -138,7 +197,7 @@ async function profileScreenCheck(buffer) {
     .normalize()
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(processed, "eng");
+  const { data } = await Tesseract.recognize(processed, "eng+chi_sim+chi_tra+jpn+kor+ara+rus")
 
   const text = data.text.toLowerCase();
 
@@ -217,10 +276,10 @@ async function handleVerification(client, { member, attachment }) {
 // 🔎 Check profile text using SAME OCR result (no new OCR call)
 const ocrText = (extractGovernorId.lastOcrText || "").toLowerCase();
 
-const hasProfileText =
-  ocrText.includes("troop") ||
-  ocrText.includes("troops") ||
-  ocrText.includes("action");
+const hasProfileText = PROFILE_KEYWORDS.some(word =>
+  ocrText.includes(word)
+);
+
 
 if (!hasProfileText) {
   console.log("❌ ID found but no Troops/Action text detected in OCR log.");
