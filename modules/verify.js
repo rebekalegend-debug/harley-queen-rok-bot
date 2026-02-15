@@ -313,8 +313,6 @@ if (!hasProfileText) {
 You are now locked. Please contact an admin.`
   );
 
-  const cfg = loadConfig(member.guild.id);
-
   if (!cfg.locked) cfg.locked = [];
 
   if (!cfg.locked.includes(user.id)) {
@@ -325,15 +323,22 @@ You are now locked. Please contact an admin.`
   console.log("User permanently locked:", user.id);
 console.log("Verifying in guild:", member.guild.id);
 
-  if (!cfg.verifyChannel) {
-    console.log("⚠️ Verify channel not set.");
-    return;
-  }
-      if (channel) {
-        await channel.send({
-          content: `❌ ${member} has been banned from verification due to suspected farm account usage or an attempt to impersonate another player / bypass the verification system.`,
-          files: [attachment.url]
-        });
+if (!cfg.verifyChannel) {
+  console.log("⚠️ Verify channel not set.");
+  return;
+}
+
+const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+
+if (!channel) {
+  console.log("❌ Could not fetch verify channel.");
+  return;
+}
+
+await channel.send({
+  content: `❌ ${member} has been banned from verification due to suspected farm account usage or bypass attempt.`,
+  files: [attachment.url]
+});
       }
 
       return;
@@ -350,11 +355,23 @@ console.log("Verifying in guild:", member.guild.id);
 
     console.log("Role ID from config:", cfg.roleId);
 console.log("Guild:", member.guild.id);
-try {
-  await member.roles.add(cfg.roleId);
-  console.log("Role successfully added.");
-} catch (err) {
-  console.error("Role add error:", err);
+
+  
+ if (!cfg.roleId) {
+  console.log("⚠️ No role configured.");
+} else {
+  const role = member.guild.roles.cache.get(cfg.roleId);
+
+  if (!role) {
+    console.log("❌ Role not found in this guild.");
+  } else {
+    try {
+      await member.roles.add(role);
+      console.log("✅ Role successfully added.");
+    } catch (err) {
+      console.error("❌ Role add error:", err);
+    }
+  }
 }
    
 
