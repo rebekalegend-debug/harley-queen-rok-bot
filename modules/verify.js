@@ -329,14 +329,6 @@ console.log("Verifying in guild:", member.guild.id);
     console.log("⚠️ Verify channel not set.");
     return;
   }
-
-
-const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
-if (!channel) {
-  console.log("❌ Could not fetch verify channel.");
-  return;
-}
-
       if (channel) {
         await channel.send({
           content: `❌ ${member} has been banned from verification due to suspected farm account usage or an attempt to impersonate another player / bypass the verification system.`,
@@ -364,7 +356,7 @@ try {
 } catch (err) {
   console.error("Role add error:", err);
 }
-    }
+   
 
     await user.send(`✅ You are now verified as **${name}**`);
 pendingGuild.delete(member.id);
