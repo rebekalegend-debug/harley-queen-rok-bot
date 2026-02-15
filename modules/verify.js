@@ -480,19 +480,24 @@ if (!message.guild) {
  // If DM contains image → verification flow
 if (message.attachments.size > 0) {
 
-  const guildId = pendingGuild.get(message.author.id);
-  if (!guildId) {
-    await message.channel.send(
-`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
-    );
-    return;
+  // Find the guild where this user is a member
+let guildMember = null;
+
+for (const guild of client.guilds.cache.values()) {
+  const member = await guild.members.fetch(message.author.id).catch(() => null);
+  if (member) {
+    guildMember = member;
+    break;
   }
+}
 
-  const guild = client.guilds.cache.get(guildId);
-  if (!guild) return;
+if (!guildMember) {
+  await message.channel.send(
+`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
+  );
+  return;
+}
 
-  const guildMember = await guild.members.fetch(message.author.id).catch(() => null);
-  if (!guildMember) return;
 
   // Push FIRST
   queue.push({
