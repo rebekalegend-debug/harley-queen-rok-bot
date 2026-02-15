@@ -167,10 +167,17 @@ async function handleVerification(client, { member, attachment }) {
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const governorId = await extractGovernorId(buffer, db);
-    const cleanId = governorId ? governorId.replace(/\D/g, "") : null;
-// ================= PROFILE KEYWORD CHECK =================
+   const governorId = await extractGovernorId(buffer, db);
+const cleanId = governorId ? governorId.replace(/\D/g, "") : null;
 
+console.log("Extracted ID:", cleanId);
+
+// 1️⃣ If no ID → normal reject
+if (!cleanId) {
+  return rejectUser(user, member, 1, attachment);
+}
+
+// 2️⃣ Run profile OCR ONLY after ID exists
 const { data: fullData } = await Tesseract.recognize(buffer, "eng");
 
 const fullText = fullData.text
@@ -185,13 +192,40 @@ const keywordFound = PROFILE_KEYWORDS.some(keyword =>
   fullText.includes(keyword)
 );
 
+// 3️⃣ If ID found but no keyword → impersonation lock
 if (!keywordFound) {
-  console.log("No profile keywords found.");
-  return rejectUser(user, member, 2, attachment);
+
+  console.log("ID found but no profile keywords → impersonation");
+
+  await user.send(
+    `❌ Governor ID detected, but this does not appear to be a valid in-game profile screen.\nYou are now locked. Please contact an admin.`
+  );
+
+  lockedUsers.add(user.id);
+
+  const cfg = loadConfig();
+  if (!cfg.locked) cfg.locked = [];
+
+  if (!cfg.locked.includes(user.id)) {
+    cfg.locked.push(user.id);
+    saveConfig(cfg);
+  }
+
+  const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+
+  if (channel) {
+    await channel.send({
+      content: `❌ ${member} attempted verification with valid ID but no profile screen keywords detected.`,
+      files: [attachment.url]
+    });
+  }
+
+  return;
 }
 
-    console.log("Extracted ID:", cleanId);
-    console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
+console.log("Profile keywords detected.");
+console.log("DB has ID?", db.has(cleanId));
+
 
     if (!cleanId) {
       return rejectUser(user, member, 1, attachment);
