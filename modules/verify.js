@@ -414,7 +414,7 @@ try {
   await member.send(
 `Welcome ${member}💗!
 
-🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here.
+🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here, and i will verify it in less than a minute.
 📸👉🪪
 
 The image must be:
