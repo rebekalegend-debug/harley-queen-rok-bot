@@ -118,8 +118,22 @@ if (!hasProfileText) {
   if (idMatch) {
   const id = idMatch[2].replace(/\D/g, "");
   console.log("Matched ID from pattern:", id);
+
+  const lowerText = data.text.toLowerCase();
+
+  const hasProfileText =
+    lowerText.includes("troop") ||
+    lowerText.includes("troops") ||
+    lowerText.includes("action");
+
+  if (!hasProfileText) {
+    console.log("❌ ID found but no Troops/Action text detected.");
+    return null;
+  }
+
   return id;
 }
+
 
 
   const cleaned = data.text.replace(/\D/g, "");
@@ -129,11 +143,24 @@ if (!hasProfileText) {
 
       const sub = cleaned.substring(i, i + len);
 
-      if (db.has(sub)) {
-        console.log("Matched DB ID from substring:", sub);
-        
-        return sub;
-      }
+     if (db.has(sub)) {
+  console.log("Matched DB ID from substring:", sub);
+
+  const lowerText = data.text.toLowerCase();
+
+  const hasProfileText =
+    lowerText.includes("troop") ||
+    lowerText.includes("troops") ||
+    lowerText.includes("action");
+
+  if (!hasProfileText) {
+    console.log("❌ ID found (fallback) but no Troops/Action text detected.");
+    return null;
+  }
+
+  return sub;
+}
+
     }
   }
 
