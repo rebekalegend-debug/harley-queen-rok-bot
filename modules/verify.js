@@ -23,7 +23,7 @@ const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
     const PROFILE_KEYWORDS = [
       "troop", "action",
       "troupes", "truppen", "truppe", "tropas",
-      "voiska", "voisk", "wojska",
+      "voiska", "voisk", "wojska", "kita",
       "akcja", "akcji", "accion", "acao", "azione",
       "pasukan", "aksi", "akeji",
       "birlik", "eylem",
