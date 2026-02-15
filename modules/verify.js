@@ -87,46 +87,61 @@ function loadDatabase() {
 
 /* ================= OCR ================= */
 
-async function extractGovernorId(buffer, db) {
+async function extractIdAndKeywords(buffer) {
 
   const processed = await sharp(buffer)
     .resize({ width: 1600 })
     .grayscale()
-    .threshold(150)
+    .normalize()
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(processed, "eng", {
-    tessedit_char_whitelist: "0123456789ID",
-  });
+  const { data } = await Tesseract.recognize(processed, "eng");
 
-  console.log("=== DIGIT OCR RAW ===");
-  console.log(data.text);
+  let text = data.text;
 
-  const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
+  console.log("=== FULL OCR TEXT ===");
+  console.log(text);
+
+  const normalizedText = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  // ===== Extract ID =====
+  let cleanId = null;
+
+  const idMatch = normalizedText.match(/(id|1d)[:\s]*([0-9]{6,9})/i);
 
   if (idMatch) {
-  const id = idMatch[2].replace(/\D/g, "");
-  console.log("Matched ID from pattern:", id);
-  return id;
-}
+    cleanId = idMatch[2].replace(/\D/g, "");
+    console.log("Matched ID from pattern:", cleanId);
+  } else {
+    const digitsOnly = normalizedText.replace(/\D/g, "");
 
-
-  const cleaned = data.text.replace(/\D/g, "");
-
-  for (let len = 6; len <= 9; len++) {
-    for (let i = 0; i <= cleaned.length - len; i++) {
-
-      const sub = cleaned.substring(i, i + len);
-
-      if (db.has(sub)) {
-        console.log("Matched DB ID from substring:", sub);
-        
-        return sub;
+    for (let len = 6; len <= 9; len++) {
+      for (let i = 0; i <= digitsOnly.length - len; i++) {
+        const sub = digitsOnly.substring(i, i + len);
+        if (/^\d{6,9}$/.test(sub)) {
+          cleanId = sub;
+          console.log("Matched ID from fallback:", cleanId);
+          break;
+        }
       }
+      if (cleanId) break;
     }
   }
 
-  return null;
+  // ===== Extract Keyword =====
+  const keywordFound = PROFILE_KEYWORDS.some(keyword =>
+    normalizedText.includes(keyword)
+  );
+
+  console.log("Keyword found:", keywordFound);
+
+  return {
+    cleanId,
+    keywordFound
+  };
 }
 
 
@@ -167,8 +182,48 @@ async function handleVerification(client, { member, attachment }) {
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-   const governorId = await extractGovernorId(buffer, db);
-const cleanId = governorId ? governorId.replace(/\D/g, "") : null;
+   const { cleanId, keywordFound } = await extractIdAndKeywords(buffer);
+
+console.log("Extracted ID:", cleanId);
+
+// 1️⃣ No ID
+if (!cleanId) {
+  return rejectUser(user, member, 1, attachment);
+}
+
+// 2️⃣ ID found but no keyword → impersonation
+if (!keywordFound) {
+
+  console.log("ID found but no profile keywords → impersonation");
+
+  await user.send(
+    `❌ Governor ID detected, but this does not appear to be a valid in-game profile screen.\nYou are now locked. Please contact an admin.`
+  );
+
+  lockedUsers.add(user.id);
+
+  const cfg = loadConfig();
+  if (!cfg.locked) cfg.locked = [];
+
+  if (!cfg.locked.includes(user.id)) {
+    cfg.locked.push(user.id);
+    saveConfig(cfg);
+  }
+
+  const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+
+  if (channel) {
+    await channel.send({
+      content: `❌ ${member} attempted verification with valid ID but no profile screen keywords detected.`,
+      files: [attachment.url]
+    });
+  }
+
+  return;
+}
+
+console.log("DB has ID?", db.has(cleanId));
+
 
 console.log("Extracted ID:", cleanId);
 
