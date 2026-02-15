@@ -19,6 +19,24 @@ const DATA_FILE = path.join(__dirname, "DATA.csv");
 const CONFIG_FILE = "/data/verify.config.json";
 const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
 
+// ================= PROFILE TEXT CHECK =================
+    const PROFILE_KEYWORDS = [
+      "troop", "action",
+      "troupes", "truppen", "truppe", "tropas",
+      "voiska", "voisk", "wojska",
+      "akcja", "akcji", "accion", "acao", "azione",
+      "pasukan", "aksi",
+      "birlik", "eylem",
+      "部队", "部隊",
+      "行動", "行动",
+      "부대", "행동",
+      "القوات"
+    ];
+
+
+
+
+
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
 }
@@ -220,19 +238,7 @@ async function handleVerification(client, { member, attachment }) {
       return rejectUser(user, member, 1, attachment);
     }
 
-    // ================= PROFILE TEXT CHECK =================
-    const PROFILE_KEYWORDS = [
-      "troop", "action",
-      "troupes", "truppen", "truppe", "tropas",
-      "voiska", "voisk", "wojska",
-      "akcja", "akcji", "accion", "acao", "azione",
-      "pasukan", "aksi",
-      "birlik", "eylem",
-      "部队", "部隊",
-      "行動", "行动",
-      "부대", "행동",
-      "القوات"
-    ];
+    
 
     const keywordFound = PROFILE_KEYWORDS.some(keyword =>
       fullText.includes(keyword)
