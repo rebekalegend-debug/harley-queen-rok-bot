@@ -212,8 +212,13 @@ async function handleVerification(client, { member, attachment }) {
     console.log(fullText);
 
     // ================= ID EXTRACTION =================
-    const idMatch = fullText.match(/(id|1d)[:\s]*([0-9]{6,9})/i);
-    const cleanId = idMatch ? idMatch[2].replace(/\D/g, "") : null;
+    const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
+
+    if (idMatch) {
+  const id = idMatch[2].replace(/\D/g, "");
+  console.log("Matched ID from pattern:", id);
+  return id;
+}
 
     console.log("Extracted ID:", cleanId);
     console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
