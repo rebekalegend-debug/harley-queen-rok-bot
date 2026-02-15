@@ -270,75 +270,52 @@ async function processQueue(client) {
 /* ================= CORE VERIFY ================= */
 
 async function handleVerification(client, { member, attachment }) {
+
   const cfg = loadConfig(member.guild.id);
   const db = loadDatabase();
-console.log("Config loaded:", loadConfig(member.guild.id));
-
   const user = member.user;
 
   try {
-    console.log("Starting verification for:", member.user.id);
+
+    console.log("Starting verification for:", member.id);
 
     const response = await fetch(attachment.url);
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const buffer = Buffer.from(await response.arrayBuffer());
 
     const governorId = await extractGovernorId(buffer, db);
     const cleanId = governorId ? governorId.replace(/\D/g, "") : null;
-
-    console.log("Extracted ID:", cleanId);
-    console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
 
     if (!cleanId) {
       return rejectUser(user, member, 1, attachment);
     }
 
-// 🔎 Check profile text using SAME OCR result (no new OCR call)
-const ocrText = (extractGovernorId.lastOcrText || "").toLowerCase();
+    const ocrText = (extractGovernorId.lastOcrText || "").toLowerCase();
 
-const hasProfileText = PROFILE_KEYWORDS.some(word =>
-  ocrText.includes(word)
-);
+    const hasProfileText = PROFILE_KEYWORDS.some(word =>
+      ocrText.includes(word)
+    );
 
+    if (!hasProfileText) {
+      return rejectUser(user, member, 2, attachment);
+    }
 
-if (!hasProfileText) {
-  console.log("❌ ID found but no Troops/Action text detected in OCR log.");
-  return rejectUser(user, member, 2, attachment);
-}
+    if (!db.has(cleanId)) {
 
+      await user.send("❌ Farm or invalid account detected. Locked.");
 
-   if (!db.has(cleanId)) {
-  await user.send(
-    `❌ You uploaded a farm account profile, or attempting to **impersonate or bypass** the system!
-You are now locked. Please contact an admin.`
-  );
+      if (!cfg.locked.includes(user.id)) {
+        cfg.locked.push(user.id);
+        saveConfig(member.guild.id, cfg);
+      }
 
-  if (!cfg.locked) cfg.locked = [];
-
-  if (!cfg.locked.includes(user.id)) {
-    cfg.locked.push(user.id);
-    saveConfig(member.guild.id, cfg);
-  }
-
-  console.log("User permanently locked:", user.id);
-console.log("Verifying in guild:", member.guild.id);
-
-if (!cfg.verifyChannel) {
-  console.log("⚠️ Verify channel not set.");
-  return;
-}
-
-const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
-
-if (!channel) {
-  console.log("❌ Could not fetch verify channel.");
-  return;
-}
-
-await channel.send({
-  content: `❌ ${member} has been banned from verification due to suspected farm account usage or bypass attempt.`,
-  files: [attachment.url]
-});
+      if (cfg.verifyChannel) {
+        const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+        if (channel) {
+          await channel.send({
+            content: `❌ ${member} banned from verification.`,
+            files: [attachment.url]
+          });
+        }
       }
 
       return;
@@ -347,57 +324,33 @@ await channel.send({
     const name = db.get(cleanId);
 
     try {
-  await member.setNickname(name);
-  console.log("Nickname changed");
-} catch (err) {
-  console.error("Nickname change failed:", err);
-}
+      await member.setNickname(name);
+    } catch {}
 
-    console.log("Role ID from config:", cfg.roleId);
-console.log("Guild:", member.guild.id);
-
-  
- if (!cfg.roleId) {
-  console.log("⚠️ No role configured.");
-} else {
-  const role = member.guild.roles.cache.get(cfg.roleId);
-
-  if (!role) {
-    console.log("❌ Role not found in this guild.");
-  } else {
-    try {
-      await member.roles.add(role);
-      console.log("✅ Role successfully added.");
-    } catch (err) {
-      console.error("❌ Role add error:", err);
+    if (cfg.roleId) {
+      const role = member.guild.roles.cache.get(cfg.roleId);
+      if (role) {
+        await member.roles.add(role).catch(() => {});
+      }
     }
-  }
-}
-   
 
     await user.send(`✅ You are now verified as **${name}**`);
-pendingGuild.delete(member.id);
-    if (!cfg.verifyChannel) {
-  console.log("⚠️ Verify channel not set.");
-  return;
-}
 
-const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
-if (!channel) {
-  console.log("❌ Could not fetch verify channel.");
-  return;
-}
-
-    if (channel) {
-      await channel.send({
-        content: `✅ ${member} verified, an **admin** please check the profile to make sure!💗`,
-        files: [attachment.url]
-      });
+    if (cfg.verifyChannel) {
+      const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+      if (channel) {
+        await channel.send({
+          content: `✅ ${member} verified.`,
+          files: [attachment.url]
+        });
+      }
     }
+
   } catch (err) {
-    console.error(err);
+    console.error("Verification error:", err);
   }
 }
+
 
 /* ================= REJECT SYSTEM ================= */
 
