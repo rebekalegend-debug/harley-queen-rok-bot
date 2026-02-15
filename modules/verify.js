@@ -272,6 +272,7 @@ async function processQueue(client) {
 async function handleVerification(client, { member, attachment }) {
   const cfg = loadConfig(member.guild.id);
   const db = loadDatabase();
+console.log("Config loaded:", loadConfig(member.guild.id));
 
   const user = member.user;
 
@@ -322,6 +323,7 @@ You are now locked. Please contact an admin.`
   }
 
   console.log("User permanently locked:", user.id);
+console.log("Verifying in guild:", member.guild.id);
 
   if (!cfg.verifyChannel) {
     console.log("⚠️ Verify channel not set.");
@@ -353,12 +355,14 @@ if (!channel) {
 } catch (err) {
   console.error("Nickname change failed:", err);
 }
-    if (cfg.roleId) {
-      try {
+
+    console.log("Role ID from config:", cfg.roleId);
+console.log("Guild:", member.guild.id);
+try {
   await member.roles.add(cfg.roleId);
-  console.log("Role added");
+  console.log("Role successfully added.");
 } catch (err) {
-  console.error("Role add failed:", err);
+  console.error("Role add error:", err);
 }
     }
 
