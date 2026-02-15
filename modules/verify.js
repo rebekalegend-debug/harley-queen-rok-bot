@@ -532,22 +532,34 @@ if (!guildMember) {
 
 // 🔔 Reminder if DM failed
 {
-  const member = message.member;
-  if (!member) return;
+ const member = message.member;
+if (!member) return;
 
-  // Ignore verified users
-  const isVerified = cfg.roleId && member.roles.cache.has(cfg.roleId);
-  if (isVerified) return;
+// Ignore verified users
+const isVerified = cfg.roleId && member.roles.cache.has(cfg.roleId);
+if (isVerified) return;
 
-  // If DM previously failed
-  if (dmSuccess.get(member.id) === false) {
+// Only act for new / unverified users
+if (dmSuccess.has(member.id)) {
+
+  const dmWorked = dmSuccess.get(member.id);
+
+  if (dmWorked === true) {
 
     await message.reply(
-"📩 Please check your private messages for verification.\nIf you did not receive one, please leave and rejoin the server."
+`Welcome ${member}💗! Please check your private messages for verification!`
     );
 
-    return;
+  } else if (dmWorked === false) {
+
+    await message.reply(
+`Welcome ${member}💗! Please check your private messages for verification!
+If you did NOT receive one, please leave and rejoin the server.`
+    );
+
   }
+
+  return;
 }
 
 
