@@ -445,38 +445,43 @@ if (!message.guild) {
     return;
   }
 
-  // If DM contains image → verification flow
-  if (message.attachments.size > 0) {
+ // If DM contains image → verification flow
+if (message.attachments.size > 0) {
 
-    const guildId = pendingGuild.get(message.author.id);
-    if (!guildId) {
-      await message.channel.send(
-`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
-      );
-      return;
-    }
-
-    const guild = client.guilds.cache.get(guildId);
-    if (!guild) return;
-
-    const guildMember = await guild.members.fetch(message.author.id).catch(() => null);
-    if (!guildMember) return;
-
-    const backlog = queue.length + (processing ? 1 : 0);
-    const waitTime = backlog * PROCESS_TIME;
-
+  const guildId = pendingGuild.get(message.author.id);
+  if (!guildId) {
     await message.channel.send(
-      `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
+`I'm just a bot, who verifying, please reach out to <@297057337590546434>`
     );
-
-    queue.push({
-      member: guildMember,
-      attachment: message.attachments.first()
-    });
-
-    processQueue(client);
     return;
   }
+
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return;
+
+  const guildMember = await guild.members.fetch(message.author.id).catch(() => null);
+  if (!guildMember) return;
+
+  // Push FIRST
+  queue.push({
+    member: guildMember,
+    attachment: message.attachments.first()
+  });
+
+  // Now calculate correctly
+  const backlog = queue.length - 1 + (processing ? 1 : 0);
+
+  // Show realistic time (including own processing time)
+  const waitTime = (backlog + 1) * PROCESS_TIME;
+
+  await message.channel.send(
+    `⏳ Please wait, I'm verifying your image.\nEstimated time: ~${waitTime} seconds`
+  );
+
+  processQueue(client);
+  return;
+}
+
 
     // If DM text but not image → reply
   await message.channel.send(
