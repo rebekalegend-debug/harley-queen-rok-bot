@@ -223,12 +223,19 @@ async function handleVerification(client, { member, attachment }) {
     console.log("FULL OCR TEXT:");
     console.log(fullText);
 
-    // ================= ID EXTRACTION =================
-    const idMatch = fullText.match(/(id|1d)[:\s]*([0-9]{6,9})/i);
-    const cleanId = idMatch ? idMatch[2].replace(/\D/g, "") : null;
+   // ================= ID EXTRACTION =================
 
-    console.log("Extracted ID:", cleanId);
-    console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
+// Accept ID, 1D, {ID, (ID, Governor{ID etc.
+const idMatch = fullText.match(/[\{\(\[]?\s*(?:id|1d)\s*[:\s]*([0-9]{6,9})/i);
+
+let cleanId = null;
+
+if (idMatch) {
+  cleanId = idMatch[1].replace(/\D/g, "");
+}
+
+console.log("Extracted ID:", cleanId);
+console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
 
     if (!cleanId) {
       return rejectUser(user, member, 1, attachment);
