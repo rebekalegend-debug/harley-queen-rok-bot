@@ -88,7 +88,7 @@ async function extractGovernorId(buffer, db) {
   const processed = await sharp(buffer)
     .resize({ width: 1600 })
     .grayscale()
-    .threshold()
+    .threshold(150)
     .toBuffer();
 
   const { data } = await Tesseract.recognize(processed, "eng", {
@@ -98,31 +98,13 @@ async function extractGovernorId(buffer, db) {
   console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
 
-
-
-
-  
   const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
 
   if (idMatch) {
   const id = idMatch[2].replace(/\D/g, "");
   console.log("Matched ID from pattern:", id);
-
-  const lowerText = data.text.toLowerCase();
-
-  const hasProfileText =
-    lowerText.includes("troop") ||
-    lowerText.includes("troops") ||
-    lowerText.includes("action");
-
-  if (!hasProfileText) {
-    console.log("❌ ID found but no Troops/Action text detected.");
-    return null;
-  }
-
   return id;
 }
-
 
 
   const cleaned = data.text.replace(/\D/g, "");
@@ -132,24 +114,11 @@ async function extractGovernorId(buffer, db) {
 
       const sub = cleaned.substring(i, i + len);
 
-     if (db.has(sub)) {
-  console.log("Matched DB ID from substring:", sub);
-
-  const lowerText = data.text.toLowerCase();
-
-  const hasProfileText =
-    lowerText.includes("troop") ||
-    lowerText.includes("troops") ||
-    lowerText.includes("action");
-
-  if (!hasProfileText) {
-    console.log("❌ ID found (fallback) but no Troops/Action text detected.");
-    return null;
-  }
-
-  return sub;
-}
-
+      if (db.has(sub)) {
+        console.log("Matched DB ID from substring:", sub);
+        
+        return sub;
+      }
     }
   }
 
