@@ -323,6 +323,12 @@ async function handleVerification(client, { member, attachment }) {
 
     const name = db.get(cleanId);
 
+
+
+    console.log("Guild ID:", member.guild.id);
+console.log("Config file:", loadConfig(member.guild.id));
+console.log("Role ID:", cfg.roleId);
+
     try {
       await member.setNickname(name);
     } catch {}
