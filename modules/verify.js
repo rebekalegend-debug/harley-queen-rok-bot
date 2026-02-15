@@ -98,10 +98,10 @@ async function extractGovernorId(buffer, db) {
   console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
 
-  const idMatch = data.text.match(/ID[:\s]*([0-9]{6,9})/i);
+  const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
 
   if (idMatch) {
-const id = idMatch[1].replace(/\D/g, "");
+  const id = idMatch[2].replace(/\D/g, "");
   console.log("Matched ID from pattern:", id);
   return id;
 }
