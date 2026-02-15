@@ -97,7 +97,9 @@ async function extractGovernorId(buffer, db) {
 
   console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
-
+// Save raw OCR text for later profile validation
+extractGovernorId.lastOcrText = data.text;
+  
   const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
 
   if (idMatch) {
@@ -212,6 +214,18 @@ async function handleVerification(client, { member, attachment }) {
       return rejectUser(user, member, 1, attachment);
     }
 
+// 🔎 Check profile text using SAME OCR result (no new OCR call)
+const ocrText = (extractGovernorId.lastOcrText || "").toLowerCase();
+
+const hasProfileText =
+  ocrText.includes("troop") ||
+  ocrText.includes("troops") ||
+  ocrText.includes("action");
+
+if (!hasProfileText) {
+  console.log("❌ ID found but no Troops/Action text detected in OCR log.");
+  return rejectUser(user, member, 2, attachment);
+}
 
 
     if (!db.has(cleanId)) {
