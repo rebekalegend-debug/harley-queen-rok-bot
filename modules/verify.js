@@ -21,7 +21,7 @@ const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
 const PROFILE_KEYWORDS = [
 
   // English
-  "troop", "troops", "action", "akcje", "acton"
+  "troop", "troops", "action", "akcje", "acton",
 
   // French
   "troupe", "troupes", "action",
