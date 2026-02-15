@@ -17,19 +17,23 @@ const lockedUsers = new Set();
 const pendingGuild = new Map(); // userId -> guildId
 const DATA_FILE = path.join(__dirname, "DATA.csv");
 const CONFIG_FILE = "/data/verify.config.json";
-const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
+const PROFILE_KEYWORDS = [
+  "troop", "action",
+  "troupes", "truppen", "truppe", "tropas",
+  "voiska", "voisk", "wojska", "kita",
+  "akcja", "akcji", "accion", "acao", "azione",
+  "pasukan", "aksi", "akeji",
+  "birlik", "eylem",
+  "部队", "部隊",
+  "行動", "行动",
+  "부대", "행동",
+  "القوات"
+];
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
 }
-
-
-const ICONS = [
-  path.join(__dirname, "1.png"),
-  path.join(__dirname, "2.png"),
-  path.join(__dirname, "3.png")
-];
-
 const PROCESS_TIME = 40; // seconds average per user
 
 let queue = [];
@@ -125,45 +129,6 @@ async function extractGovernorId(buffer, db) {
   return null;
 }
 
-/* ================= PROFILE SCREEN CHECK ================= */
-
-async function profileScreenCheck(buffer) {
-  console.log("🔎 Checking for profile screen via text...");
-
-  const processed = await sharp(buffer)
-    .resize({ width: 1600 })
-    .grayscale()
-    .normalize()
-    .toBuffer();
-
-  const { data } = await Tesseract.recognize(processed, "eng");
-
-  const text = data.text.toLowerCase();
-
-  console.log("=== PROFILE OCR TEXT ===");
-  console.log(text);
-
-  const anchors = [
-    "troops",
-    "commander",
-    "rankings",
-    "achievements",
-    "alliance",
-    "civilization",
-    "governor"
-  ];
-
-  const found = anchors.some(word => text.includes(word));
-
-  if (found) {
-    console.log("✅ Profile screen confirmed via text anchor.");
-    return true;
-  }
-
-  console.log("❌ Profile screen text anchor not found.");
-  return false;
-}
-
 
 /* ================= QUEUE SYSTEM ================= */
 
@@ -204,6 +169,26 @@ async function handleVerification(client, { member, attachment }) {
 
     const governorId = await extractGovernorId(buffer, db);
     const cleanId = governorId ? governorId.replace(/\D/g, "") : null;
+// ================= PROFILE KEYWORD CHECK =================
+
+const { data: fullData } = await Tesseract.recognize(buffer, "eng");
+
+const fullText = fullData.text
+  .toLowerCase()
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "");
+
+console.log("PROFILE OCR TEXT:");
+console.log(fullText);
+
+const keywordFound = PROFILE_KEYWORDS.some(keyword =>
+  fullText.includes(keyword)
+);
+
+if (!keywordFound) {
+  console.log("No profile keywords found.");
+  return rejectUser(user, member, 2, attachment);
+}
 
     console.log("Extracted ID:", cleanId);
     console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
