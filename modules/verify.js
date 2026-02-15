@@ -14,10 +14,14 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const lockedUsers = new Set();
+const dmSuccess = new Map();
+
 const pendingGuild = new Map(); // userId -> guildId
 const DATA_FILE = path.join(__dirname, "DATA.csv");
 const CONFIG_FILE = "/data/verify.config.json";
 const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
+const dmSuccess = new Map(); // userId -> boolean
+
 const PROFILE_KEYWORDS = [
 
   // English
@@ -441,23 +445,21 @@ Thank you.`
     return; // 🔴 VERY IMPORTANT — stop here
   }
 
-  // ✅ Normal users get welcome
+ // ✅ Normal users get welcome
 try {
   await member.send(
-`Welcome ${member}💗!
-
-🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here, and i will verify it in less than a minute.
-📸👉🪪
-
-The image must be:
-• A real screenshot taken by you recently  
-• Full screen (no crop)  
-• With visible action points, name and civ change icon
-• Showing your main account (no farm accounts)
-
-⚠️ Edited, cropped, forwarded, or fake images will result in verification lock.`
+`Welcome ${member}💗! Please check your private messages for verification!
+If you do NOT received one, please leave and rejoin the server.`
   );
-} catch {}
+
+  dmSuccess.set(member.id, true);
+  console.log("Welcome DM sent:", member.id);
+
+} catch (err) {
+
+  dmSuccess.set(member.id, false);
+  console.log("Welcome DM failed:", member.id, err?.code);
+}
 
 });
 
@@ -528,7 +530,31 @@ if (!guildMember) {
   return;
 }
   /* ================= GUILD MESSAGES ================= */
+/* ================= GUILD MESSAGES ================= */
 
+// 🔔 Reminder if DM failed
+{
+  const member = message.member;
+  if (!member) return;
+
+  // Ignore verified users
+  const isVerified = cfg.roleId && member.roles.cache.has(cfg.roleId);
+  if (isVerified) return;
+
+  // If DM previously failed
+  if (dmSuccess.get(member.id) === false) {
+
+    await message.reply(
+"📩 Please check your private messages for verification.\nIf you did not receive one, please leave and rejoin the server."
+    );
+
+    return;
+  }
+}
+
+
+
+    
 // Fallback welcome DM if first one failed
 if (message.guild && pendingGuild.has(message.author.id)) {
 
