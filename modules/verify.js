@@ -23,7 +23,7 @@ const ID_ANCHOR = path.join(__dirname, "id_anchor.png");
     const PROFILE_KEYWORDS = [
       "troop", "action",
       "troupes", "truppen", "truppe", "tropas",
-      "voiska", "voisk", "wojska", "kita",
+      "voiska", "voisk", "wojska",
       "akcja", "akcji", "accion", "acao", "azione",
       "pasukan", "aksi", "akeji",
       "birlik", "eylem",
@@ -112,17 +112,27 @@ async function extractGovernorId(buffer, db) {
   console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
 
+  const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
+
+  if (idMatch) {
+  const id = idMatch[2].replace(/\D/g, "");
+  console.log("Matched ID from pattern:", id);
+  return id;
+}
+
+
   const cleaned = data.text.replace(/\D/g, "");
 
-  const candidates = cleaned.match(/\d{6,10}/g);
-  if (!candidates) return null;
+  for (let len = 6; len <= 9; len++) {
+    for (let i = 0; i <= cleaned.length - len; i++) {
 
-  console.log("Candidates found:", candidates);
+      const sub = cleaned.substring(i, i + len);
 
-  for (const num of candidates) {
-    if (db.has(num)) {
-      console.log("Matched DB ID:", num);
-      return num;
+      if (db.has(sub)) {
+        console.log("Matched DB ID from substring:", sub);
+        
+        return sub;
+      }
     }
   }
 
@@ -203,22 +213,19 @@ async function handleVerification(client, { member, attachment }) {
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Run OCR ONCE
-    const { data } = await Tesseract.recognize(buffer, "eng");
-    const fullText = data.text;
-    const lowerText = fullText.toLowerCase();
+    const { data: fullData } = await Tesseract.recognize(buffer, "eng");
+
+    const fullText = fullData.text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
 
     console.log("FULL OCR TEXT:");
     console.log(fullText);
 
     // ================= ID EXTRACTION =================
-    const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
-
-    if (idMatch) {
-  const id = idMatch[2].replace(/\D/g, "");
-  console.log("Matched ID from pattern:", id);
-  return id;
-}
+    const idMatch = fullText.match(/(id|1d)[:\s]*([0-9]{6,9})/i);
+    const cleanId = idMatch ? idMatch[2].replace(/\D/g, "") : null;
 
     console.log("Extracted ID:", cleanId);
     console.log("DB has ID?", cleanId ? db.has(cleanId) : false);
@@ -227,12 +234,14 @@ async function handleVerification(client, { member, attachment }) {
       return rejectUser(user, member, 1, attachment);
     }
 
-    // ================= TROOPS / ACTION CHECK =================
-    const hasTroop = lowerText.includes("troop");
-    const hasAction = lowerText.includes("action");
+    
 
-    if (!hasTroop && !hasAction) {
-      console.log("Neither 'troop' nor 'action' found.");
+    const keywordFound = PROFILE_KEYWORDS.some(keyword =>
+      fullText.includes(keyword)
+    );
+
+    if (!keywordFound) {
+      console.log("No valid profile keywords found.");
       return rejectUser(user, member, 2, attachment);
     }
 
@@ -264,24 +273,13 @@ async function handleVerification(client, { member, attachment }) {
 
       return;
     }
-
-    // ================= SUCCESS =================
+   // ================= SUCCESS =================
     const name = db.get(cleanId);
 
-    try {
-      await member.setNickname(name);
-      console.log("Nickname changed");
-    } catch (err) {
-      console.error("Nickname change failed:", err);
-    }
+    await member.setNickname(name).catch(console.error);
 
     if (cfg.roleId) {
-      try {
-        await member.roles.add(cfg.roleId);
-        console.log("Role added");
-      } catch (err) {
-        console.error("Role add failed:", err);
-      }
+      await member.roles.add(cfg.roleId).catch(console.error);
     }
 
     await user.send(`✅ You are now verified as **${name}**`);
@@ -291,7 +289,7 @@ async function handleVerification(client, { member, attachment }) {
       const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
       if (channel) {
         await channel.send({
-          content: `✅ ${member} verified.`,
+          content: `✅ ${member} verified, an **admin** please check the profile to make sure!💗`,
           files: [attachment.url]
         });
       }
@@ -301,7 +299,6 @@ async function handleVerification(client, { member, attachment }) {
     console.error(err);
   }
 }
-
 /* ================= REJECT SYSTEM ================= */
 
 async function rejectUser(user, member, type, attachment) {
