@@ -172,8 +172,7 @@ async function extractGovernorId(buffer, db) {
   const { data } = await Tesseract.recognize(processed, "eng")
   {
     tessedit_char_whitelist: "0123456789IDOD",
-  
-);
+      };
 
   console.log("=== DIGIT OCR RAW ===");
   console.log(data.text);
