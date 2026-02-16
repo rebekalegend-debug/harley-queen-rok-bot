@@ -23,7 +23,7 @@ const dmSuccess = new Map(); // userId -> boolean
 const PROFILE_KEYWORDS = [
 
   // English
-  "troop", "troops", "action", "akcje", "acton", "القوات", "القوات", 
+  "troop", "troops", "action", "akcje", "acton", "akcji", "القوات", 
 
   // French
   "troupe", "troupes", "action", "الإعدادات", "إعدادات",
