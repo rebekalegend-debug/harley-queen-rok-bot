@@ -298,6 +298,12 @@ async function handleVerification(client, { member, attachment }) {
       ocrText.includes(word)
     );
 
+
+    console.log(
+  "Profile keyword matched:",
+  PROFILE_KEYWORDS.find(word => ocrText.includes(word)) || "NONE"
+);
+    
     if (!hasProfileText) {
       return rejectUser(user, member, 2, attachment);
     }
