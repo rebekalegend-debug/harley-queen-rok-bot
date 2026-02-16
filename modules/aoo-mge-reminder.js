@@ -328,8 +328,7 @@ async function rebuildGuildSchedule(client, guildId) {
   const regChMention = cfg.mgeRegisterChannelId
     ? `<#${cfg.mgeRegisterChannelId}>`
     : "**#mgechannel**";
-
-  items.push({
+     
     items.push({
   whenMs: open24hAfterEnd,
   label: `MGE registration OPEN`,
