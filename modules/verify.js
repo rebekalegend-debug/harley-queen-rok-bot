@@ -290,6 +290,12 @@ async function handleVerification(client, { member, attachment }) {
 
     if (!cleanId) {
       return rejectUser(user, member, 1, attachment);
+    console.log(
+  "ID found in DB:",
+  cleanId,
+  db.has(cleanId) ? "YES" : "NO"
+);
+
     }
 
     const ocrText = (extractGovernorId.lastOcrText || "").toLowerCase();
