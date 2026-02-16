@@ -577,9 +577,9 @@ if (message.content === "!verify locked") {
       const worked = dmSuccess.get(member.id);
 
       if (worked) {
-        await message.reply("Please check your private messages for verification.");
+        await message.reply("**Please check your private messages for verification!**");
       } else {
-        await message.reply("Please enable DMs and rejoin the server to receive verification message.");
+        await message.reply("**Please enable DMs and rejoin the server to receive verification message.**");
       }
 
       return;
