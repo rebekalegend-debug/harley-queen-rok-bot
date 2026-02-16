@@ -169,9 +169,7 @@ async function extractGovernorId(buffer, db) {
     .threshold(150)
     .toBuffer();
 
-  const { data } = await Tesseract.recognize(
-  processed,
-  "eng+chi_sim+chi_tra+jpn+kor+ara+rus+deu+fra+spa+por+ita+pol+tur+vie+tha",
+  const { data } = await Tesseract.recognize(processed, "eng")
   {
     tessedit_char_whitelist: "0123456789IDOD",
   }
