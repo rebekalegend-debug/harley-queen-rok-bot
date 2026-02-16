@@ -303,7 +303,7 @@ async function handleVerification(client, { member, attachment }) {
 
       await user.send(
         `❌ You uploaded a farm account profile, or attempting to **impersonate or bypass** the system!
-         You are now banned. Please contact <@297057337590546434>.`
+You are now banned. Please contact <@297057337590546434>.`
         );
 
       if (!cfg.locked.includes(user.id)) {
