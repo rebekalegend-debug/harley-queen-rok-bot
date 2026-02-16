@@ -301,7 +301,10 @@ async function handleVerification(client, { member, attachment }) {
 
     if (!db.has(cleanId)) {
 
-      await user.send("❌ Farm or invalid account detected. Locked.");
+      await user.send(
+        `❌ You uploaded a farm account profile, or attempting to **impersonate or bypass** the system!
+         You are now banned. Please contact <@297057337590546434>.`
+        );
 
       if (!cfg.locked.includes(user.id)) {
         cfg.locked.push(user.id);
@@ -312,7 +315,7 @@ async function handleVerification(client, { member, attachment }) {
         const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
         if (channel) {
           await channel.send({
-            content: `❌ ${member} banned from verification.`,
+            content: `❌ ${member} tryed to bypass me and got banned from verification, please check it! `,
             files: [attachment.url]
           });
         }
@@ -367,7 +370,7 @@ async function rejectUser(user, member, type, attachment) {
 if (attempts >= 3) {
 
   await user.send(
-    `❌ Stop uploading. Please **contact an admin**.`
+    `❌ Stop uploading. Please contact <@297057337590546434>.`
   );
 
   // 🔒 Permanently lock user
@@ -424,7 +427,7 @@ export function setupVerify(client) {
 
     if (cfg.locked && cfg.locked.includes(member.id)) {
       try {
-        await member.send("🚫 You are banned from verification. Contact an admin.");
+        await member.send("🚫 You are banned from verification. Contact <@297057337590546434>.");
       } catch {}
       return;
     }
@@ -433,9 +436,13 @@ export function setupVerify(client) {
       await member.send(
 `Welcome ${member} 💗!
 
-🆙 Please upload your Rise of Kingdoms profile screenshot here.
+🆙 Please upload a screenshot of your **Rise of Kingdoms profile** here, and i will verify it in less than a minute.
+📸👉🪪 The image must be: 
 
-⚠️ Cropped / edited images will result in verification lock.`
+• A real screenshot taken by you recently with visible action points, name and civ change icon 
+• Showing your main account (no farm accounts) 
+
+⚠️ Edited, cropped, forwarded, or fake images will result in verification ban.`
       );
 
       dmSuccess.set(member.id, true);
