@@ -178,12 +178,15 @@ async function extractGovernorId(buffer, db) {
 // Save raw OCR text for later profile validation
 extractGovernorId.lastOcrText = data.text;
   
-  const idMatch = data.text.match(/(ID|1D)[:\s]*([0-9]{6,9})/i);
+ // Try to detect ID / 1D / OD / D etc before digits
+const idMatch = data.text.match(/([I1O0]D|D|ID|1D|OD)?\s*[:\-]?\s*([0-9]{6,9})/i);
 
-  if (idMatch) {
+if (idMatch) {
   const id = idMatch[2].replace(/\D/g, "");
-  console.log("Matched ID from pattern:", id);
-  return id;
+
+  if (id.length >= 6 && id.length <= 9) {
+    console.log("Matched ID from flexible pattern:", id);
+    return id;
 }
 
 
