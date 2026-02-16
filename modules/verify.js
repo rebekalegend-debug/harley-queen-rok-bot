@@ -299,30 +299,50 @@ async function handleVerification(client, { member, attachment }) {
       return rejectUser(user, member, 2, attachment);
     }
 
-    if (!db.has(cleanId)) {
+   if (!db.has(cleanId)) {
 
-      await user.send(
-        `❌ You uploaded a farm account profile, or attempting to **impersonate or bypass** the system!
-You are now banned. Please contact <@297057337590546434>.`
-        );
+  await user.send(
+    `❌ You attempted to impersonate or bypass the verification system.\n` +
+    `You are permanently banned.\n` +
+    `Contact <@297057337590546434>.`
+  ).catch(() => {});
 
-      if (!cfg.locked.includes(user.id)) {
-        cfg.locked.push(user.id);
-        saveConfig(member.guild.id, cfg);
-      }
+  if (!cfg.locked) cfg.locked = [];
 
-      if (cfg.verifyChannel) {
-        const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
-        if (channel) {
-          await channel.send({
-            content: `❌ ${member} tryed to bypass me and got banned from verification, please check it! `,
-            files: [attachment.url]
-          });
-        }
-      }
+  if (!cfg.locked.includes(user.id)) {
+    cfg.locked.push(user.id);
+    saveConfig(member.guild.id, cfg);
+  }
 
-      return;
+  // 📤 Send evidence to verify channel
+  if (cfg.verifyChannel) {
+    const channel = await client.channels.fetch(cfg.verifyChannel).catch(() => null);
+
+    if (channel) {
+      await channel.send({
+        content:
+          `❌ ${member} attempted to impersonate or bypass verification.\n` +
+          `User has been permanently banned.`,
+        files: [attachment.url]
+      });
     }
+  }
+
+  // 🚨 BAN USER
+  if (member.bannable) {
+    try {
+      await member.ban({ reason: "Impersonation / Verification bypass attempt" });
+      console.log("User banned for impersonation:", member.id);
+    } catch (err) {
+      console.error("Ban failed:", err);
+    }
+  } else {
+    console.log("Cannot ban user (role hierarchy issue).");
+  }
+
+  return;
+}
+
 
     const name = db.get(cleanId);
 
@@ -370,18 +390,17 @@ async function rejectUser(user, member, type, attachment) {
 if (attempts >= 3) {
 
   await user.send(
-    `❌ Stop uploading. Please contact <@297057337590546434>.`
-  );
+    `❌ Stop uploading. You have failed verification 3 times.\nContact <@297057337590546434>.`
+  ).catch(() => {});
 
-  // 🔒 Permanently lock user
   const cfg = loadConfig(member.guild.id);
 
-if (!cfg.locked) cfg.locked = [];
+  if (!cfg.locked) cfg.locked = [];
 
-if (!cfg.locked.includes(user.id)) {
-  cfg.locked.push(user.id);
-  saveConfig(member.guild.id, cfg);
-}
+  if (!cfg.locked.includes(user.id)) {
+    cfg.locked.push(user.id);
+    saveConfig(member.guild.id, cfg);
+  }
 
   console.log("User auto-locked after 3 failed attempts:", user.id);
 
@@ -391,10 +410,24 @@ if (!cfg.locked.includes(user.id)) {
 
     if (channel && attachment) {
       await channel.send({
-        content: `❌ ${member} failed to verify after 3 attempts.\nI cannot clearly read the Governor ID due to low quality or incorrect screenshot.\nAn **admin** please assist.`,
+        content:
+          `❌ ${member} failed verification after 3 attempts.\n` +
+          `User has been permanently banned from verification.`,
         files: [attachment.url]
       });
     }
+  }
+
+  // 🚨 BAN USER
+  if (member.bannable) {
+    try {
+      await member.ban({ reason: "Failed verification 3 times" });
+      console.log("User banned:", member.id);
+    } catch (err) {
+      console.error("Ban failed:", err);
+    }
+  } else {
+    console.log("Cannot ban user. Check role hierarchy.");
   }
 
   return;
