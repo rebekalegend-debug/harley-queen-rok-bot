@@ -330,12 +330,13 @@ async function rebuildGuildSchedule(client, guildId) {
     : "**#mgechannel**";
 
   items.push({
-    whenMs: open24hAfterEnd,
-    label: `MGE registration OPEN (${fmtUTC(open24hAfterEnd)})`,
-    channelId: pingChId,
-    message: `@everyone 📢 **MGE registration is OPEN!**✅
-Register in ${regChMention}, or reach out to ${mgeMention}!
-🗓️ Next MGE starts: **${fmtUTC(startMs)}** (UTC)`,
+    items.push({
+  whenMs: open24hAfterEnd,
+  label: `MGE registration OPEN`,
+  channelId: pingChId,
+  message:
+    `@everyone 📢 **MGE registration is OPEN!**✅\n` +
+    `Register in ${regChMention}, or reach out to ${mgeMention}!`,
   });
 }
 
@@ -343,22 +344,22 @@ Register in ${regChMention}, or reach out to ${mgeMention}!
 
     if (inWindow(closeWarn48hBeforeStart, now, end)) {
       items.push({
-        whenMs: closeWarn48hBeforeStart,
-        label: `MGE registration closing soon (${fmtUTC(closeWarn48hBeforeStart)})`,
-        channelId: pingChId,
-        message:
-          `@everyone ⚠️ **MGE registration closes in 24 hours!**\n` +
-          `Don’t forget to apply.\n` +
-          `🗓️ MGE starts: **${fmtUTC(startMs)}** (UTC)`,
+  whenMs: closeWarn48hBeforeStart,
+  label: `MGE registration closing soon`,
+  channelId: pingChId,
+  message:
+    `@everyone ⚠️ **MGE registration closes in 24 hours!**\n` +
+    `Don’t forget to apply.`,
       });
     }
 
     if (inWindow(closed24hBeforeStart, now, end)) {
       items.push({
-        whenMs: closed24hBeforeStart,
-        label: `MGE registration CLOSED (${fmtUTC(closed24hBeforeStart)})`,
-        channelId: pingChId,
-        message: `@everyone 🔒 **MGE registration is closed.**`,
+        items.push({
+  whenMs: closed24hBeforeStart,
+  label: `MGE registration CLOSED`,
+  channelId: pingChId,
+  message: `@everyone 🔒 **MGE registration is closed.**`,
       });
     }
   }
