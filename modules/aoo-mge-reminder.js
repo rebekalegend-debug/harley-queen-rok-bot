@@ -354,7 +354,6 @@ async function rebuildGuildSchedule(client, guildId) {
 
     if (inWindow(closed24hBeforeStart, now, end)) {
       items.push({
-        items.push({
   whenMs: closed24hBeforeStart,
   label: `MGE registration CLOSED`,
   channelId: pingChId,
