@@ -188,7 +188,7 @@ if (idMatch) {
     console.log("Matched ID from flexible pattern:", id);
     return id;
 }
-
+}
 
   const cleaned = data.text.replace(/\D/g, "");
 
