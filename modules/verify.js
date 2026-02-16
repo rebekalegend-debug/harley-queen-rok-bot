@@ -461,7 +461,7 @@ if (isDM) {
   const guildId = pendingGuild.get(message.author.id);
 
   if (!guildId) {
-    await message.channel.send("I'm just a bot, please contact admin.");
+    await message.channel.send("I'm just a bot. Contact <@297057337590546434>");
     return;
   }
 
@@ -469,7 +469,7 @@ if (isDM) {
 
   // Check locked ONLY in correct guild
   if (cfg.locked && cfg.locked.includes(message.author.id)) {
-    await message.channel.send("I'm just a bot, please contact admin.");
+    await message.channel.send("I'm just a bot. Contact <@297057337590546434>");
     return;
   }
 
